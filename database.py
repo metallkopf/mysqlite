@@ -12,7 +12,7 @@ class Database:
   def __init__(self, path):
     if isfile(path):
       self.db = connect("file:%s?mode=ro" % path, uri=True)
-      self.db.row_factory = self._dict_factory
+      self.db.row_factory = self._str_factory
       self.name = splitext(basename(path))[0]
     else:
       raise FileNotFoundError()
@@ -23,6 +23,16 @@ class Database:
       d[col[0]] = row[idx]
     return d
 
+  def _str_factory(self, cursor, row):
+    data = {}
+    for index, column in enumerate(cursor.description):
+      value = row[index]
+      if value is not None or type(value) is not str:
+        value = str(value)
+
+      data[column[0]] = value
+    return data
+
   def _cursor(self):
     return self.db.cursor()
 
@@ -30,11 +40,11 @@ class Database:
     return self.db.cursor().execute(query)
 
   def show_databases(self):
-    meta = {"SCHEMA_NAME": {"table": "SCHEMATA"}}
+    meta = [{"name": "SCHEMA_NAME", "table": "SCHEMATA"}]
     return meta, [{"SCHEMA_NAME": self.name}]
 
   def show_tables(self):
-    meta = {"TABLE_NAME": {"table": "TABLE"}}
+    meta = [{"name": "TABLE_NAME", "table": "TABLE"}]
     sql = "SELECT name AS TABLE_NAME FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
     result = self._exec(sql)
     data = result.fetchall()
@@ -56,11 +66,11 @@ class Database:
     result = self._exec(sql)
 
     columns = ["Field", "Type", "Null", "Key", "Default", "Extra"]
-    meta = data = []
+    meta = []
+    data = []
 
     for column in columns:
-      item = {"name": column, "table": "COLUMNS"}
-      data.append(item)
+      meta.append({"name": column, "table": "COLUMNS"})
 
     rows = result.fetchall()
 
@@ -72,6 +82,18 @@ class Database:
       default = row["dflt_value"]
       field = self._convert_type(row["type"])
 
-      data.append([name, field, null, key, default, extra])
+      data.append({"Field": name, "Type": field, "Null": null,
+                   "Key": key, "Default": default, "Extra": extra})
+
+    return meta, data
+
+  def exec_query(self, sql):
+    result = self._exec(sql)
+
+    meta = []
+    data = result.fetchall()
+
+    for row in result.description:
+      meta.append({"name": row[0], "table": "RESULT"})
 
     return meta, data

@@ -4,6 +4,7 @@ from socketserver import StreamRequestHandler
 from threading import current_thread
 from binascii import hexlify
 from io import BytesIO
+from database import Database
 from definitions import *
 from utils import *
 
@@ -19,6 +20,7 @@ SERVER_CAPABILITIES2 = 0
 
 
 class Server(StreamRequestHandler):
+  db = None
   packet_number = -1
   thread = 0
   connected = False
@@ -27,13 +29,16 @@ class Server(StreamRequestHandler):
   max_packet = 0
   charset = 0
   username = ""
-  database = ""
+  schema = ""
 
   def send_packet(self, payload):
     if type(payload) is BytesIO:
       payload = payload.getvalue()
 
-    self.packet_number += 1
+    if self.packet_number < 254:
+      self.packet_number += 1
+    else:
+      self.packet_number = 0
     print(self.thread, "SENDING [%d] (%d)..." % (self.packet_number, len(payload)))
 
     header = BytesIO()
@@ -43,6 +48,7 @@ class Server(StreamRequestHandler):
 
     self.wfile.write(header.getvalue())
     self.wfile.write(payload)
+    #self.wfile.flush()
     print("", hexlify(payload).decode())
     print("", payload)
 
@@ -99,7 +105,7 @@ class Server(StreamRequestHandler):
     collation = Charset.BINARY if field == FieldType.LONGLONG else Charset.UTF8_GENERAL_CI
 
     payload.write(pack_string("def")) # catalog
-    payload.write(pack_string(self.database)) # schema
+    payload.write(pack_string(self.schema)) # schema
     payload.write(pack_string(table)) # table
 
     payload.write(pack_padding()) # org_table
@@ -118,63 +124,57 @@ class Server(StreamRequestHandler):
     self.send_packet(payload)
 
   def send_resultset(self, rows, meta):
-    if rows is None or len(rows) == 0:
-      self.send_ok()
-    else:
-      columns = [aux["name"] for aux in meta]
-      fields = {}
+    columns = [aux["name"] for aux in meta]
+    fields = {}
 
-      self.send_packet(pack_byte(len(columns)))
+    self.send_packet(pack_byte(len(columns)))
 
-      for definition in meta:
-        name = definition["name"]
-        length = definition.get("length", 255)
-        field = definition.get("type", FieldType.VAR_STRING)
-        table = definition.get("table", "")
+    for definition in meta:
+      name = definition["name"]
+      length = definition.get("length", 255)
+      field = definition.get("type", FieldType.VAR_STRING)
+      table = definition.get("table", "")
 
+      if field == FieldType.LONGLONG:
+        length = 20
+
+      fields[name] = field
+
+      self.send_columndef(name, length, field, table)
+
+    self.send_eof()
+
+    for row in rows:
+      payload = BytesIO()
+
+      for column, field in fields.items():
         if field == FieldType.LONGLONG:
-          length = 20
+          payload.write(pack_varinteger(row[column]))
+        else:
+          payload.write(pack_string(row[column]))
 
-        fields[name] = field
+      self.send_packet(payload)
 
-        self.send_columndef(name, length, field, table)
-
-      self.send_eof()
-
-      for row in rows:
-        payload = BytesIO()
-
-        for column, field in fields.items():
-          if field == FieldType.LONGLONG:
-            payload.write(pack_varinteger(row[column]))
-          else:
-            payload.write(pack_string(row[column]))
-
-        self.send_packet(payload)
-
-      self.send_eof()
-      self.wfile.flush()
+    self.send_eof()
 
   def show_databases(self):
-    self.send_resultset([{"name": "test"}], [{"name": "name", "table": "databases"}])
+    meta, data = self.db.show_databases()
+    self.send_resultset(data, meta)
 
   def show_tables(self):
-    self.send_resultset([{"name": "temp"}], [{"name": "name", "table": "tables"}])
+    meta, data = self.db.show_tables()
+    self.send_resultset(data, meta)
 
-  def show_columns(self):
-    data = [{"Field": "id", "Type": "INTEGER", "Null": "NO",
-             "Key": "PRI", "Default": None, "Extra": "auto_increment"},
-            {"Field": "value", "Type": "TEXT", "Null": "YES",
-             "Key": "", "Default": None, "Extra": ""}]
-    meta = [{"name": "Field", "table": "columns"},
-            {"name": "Type", "table": "columns"},
-            {"name": "Null", "table": "columns"},
-            {"name": "Key", "table": "columns"},
-            {"name": "Default", "table": "columns"},
-            {"name": "Extra", "table": "columns"}]
+  def show_columns(self, table):
+    meta, data = self.db.show_columns(table)
+    self.send_resultset(data, meta)
+
+  def exec_query(self, sql):
+    meta, data = self.db.exec_query(sql)
     self.send_resultset(data, meta)
 
   def handle(self):
+    self.db = Database(self.server.path)
     self.thread = int(current_thread().name.split("-")[-1])
     self.send_handshake()
 
@@ -215,14 +215,16 @@ class Server(StreamRequestHandler):
           elif query.upper() == "SHOW TABLES":
             self.show_tables()
           elif query.upper().startswith("SHOW COLUMNS"):
-            self.show_columns()
+            self.show_columns("albums")
+          elif query.upper().startswith("SELECT"):
+            self.exec_query(query)
           elif query.upper().startswith("SET "):
             self.send_ok()
           else:
             self.send_ok()
         elif command == Command.INIT_DB:
-          self.database = read_string(payload)
-          print("USE DATABASE", self.database)
+          self.schema = read_string(payload)
+          print("USE DATABASE", self.schema)
           self.send_ok()
         elif command == Command.QUIT:
           self.connected = False
