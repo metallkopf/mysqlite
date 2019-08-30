@@ -8,6 +8,14 @@ def pack_string(value=None):
   else:
     return pack_padding()
 
+def pack_resstring(value):
+  if value is None:
+    return pack_byte(0xfb)
+  elif type(value) is not str:
+    value = str(value)
+
+  return pack_string(value)
+
 def pack_nullstring(value=""):
   if len(value) > 0:
     return pack("%dsx" % len(value), value.encode())

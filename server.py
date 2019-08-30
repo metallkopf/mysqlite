@@ -35,7 +35,7 @@ class Server(StreamRequestHandler):
     if type(payload) is BytesIO:
       payload = payload.getvalue()
 
-    if self.packet_number < 254:
+    if self.packet_number < 255:
       self.packet_number += 1
     else:
       self.packet_number = 0
@@ -123,35 +123,22 @@ class Server(StreamRequestHandler):
 
     self.send_packet(payload)
 
-  def send_resultset(self, rows, meta):
-    columns = [aux["name"] for aux in meta]
-    fields = {}
+  def send_resultset(self, meta, data):
+    self.send_packet(pack_byte(len(meta)))
 
-    self.send_packet(pack_byte(len(columns)))
+    for name, field in meta:
+      field = self.db.internal_type(field)
+      length = 20 if field == FieldType.VAR_STRING else 255
 
-    for definition in meta:
-      name = definition["name"]
-      length = definition.get("length", 255)
-      field = definition.get("type", FieldType.VAR_STRING)
-      table = definition.get("table", "")
-
-      if field == FieldType.LONGLONG:
-        length = 20
-
-      fields[name] = field
-
-      self.send_columndef(name, length, field, table)
+      self.send_columndef(name, length, field)
 
     self.send_eof()
 
-    for row in rows:
+    for row in data:
       payload = BytesIO()
 
-      for column, field in fields.items():
-        if field == FieldType.LONGLONG:
-          payload.write(pack_varinteger(row[column]))
-        else:
-          payload.write(pack_string(row[column]))
+      for value in row:
+        payload.write(pack_resstring(value))
 
       self.send_packet(payload)
 
@@ -159,19 +146,19 @@ class Server(StreamRequestHandler):
 
   def show_databases(self):
     meta, data = self.db.show_databases()
-    self.send_resultset(data, meta)
+    self.send_resultset(meta, data)
 
   def show_tables(self):
     meta, data = self.db.show_tables()
-    self.send_resultset(data, meta)
+    self.send_resultset(meta, data)
 
   def show_columns(self, table):
     meta, data = self.db.show_columns(table)
-    self.send_resultset(data, meta)
+    self.send_resultset(meta, data)
 
   def exec_query(self, sql):
     meta, data = self.db.exec_query(sql)
-    self.send_resultset(data, meta)
+    self.send_resultset(meta, data)
 
   def handle(self):
     self.db = Database(self.server.path)
