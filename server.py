@@ -97,10 +97,10 @@ class Server(StreamRequestHandler):
 
     self.send_packet(payload)
 
-  def send_error(self, message):
+  def send_error(self, message="", error=1064):
     payload = BytesIO()
     payload.write(pack_byte(0xff)) # header
-    payload.write(pack_integer(1064)) # error_code
+    payload.write(pack_integer(error)) # error_code
 
     if SERVER_CAPABILITIES & Capability.PROTOCOL_41:
       payload.write(pack_fixedstring("#")) # sql_state_marker
@@ -135,7 +135,8 @@ class Server(StreamRequestHandler):
 
     self.send_packet(payload)
 
-  def send_resultset(self, meta, data):
+  def send_resultset(self, data):
+    meta, rows = data
     self.send_packet(pack_byte(len(meta)))
 
     for name, field in meta:
@@ -146,7 +147,7 @@ class Server(StreamRequestHandler):
 
     self.send_eof()
 
-    for row in data:
+    for row in rows:
       payload = BytesIO()
 
       for value in row:
@@ -155,30 +156,6 @@ class Server(StreamRequestHandler):
       self.send_packet(payload)
 
     self.send_eof()
-
-  def show_databases(self):
-    meta, data = self.db.show_databases()
-    self.send_resultset(meta, data)
-
-  def show_tables(self):
-    meta, data = self.db.show_tables()
-    self.send_resultset(meta, data)
-
-  def show_create_table(self, name):
-    meta, data = self.db.show_create_table(name)
-    self.send_resultset(meta, data)
-
-  def show_columns(self, table, full=False):
-    meta, data = self.db.show_columns(table, full)
-    self.send_resultset(meta, data)
-
-  def show_variables(self):
-    meta, data = self.db.show_variables()
-    self.send_resultset(meta, data)
-
-  def execute(self, sql):
-    meta, data = self.db.execute(sql)
-    self.send_resultset(meta, data)
 
   def handle(self):
     self.db = Database(self.server.path)
@@ -214,31 +191,63 @@ class Server(StreamRequestHandler):
         command = read_data(payload, "<B")[0]
 
         if command == Command.QUERY:
-          query = read_string(payload).strip()
+          query = read_string(payload).strip().strip(";")
           print(self.thread, "QUERY:", query)
 
           if query.upper() == "SHOW DATABASES":
-            self.show_databases()
+            self.send_resultset(self.db.show_databases())
           elif query.upper() == "SHOW TABLES":
-            self.show_tables()
+            self.send_resultset(self.db.show_tables())
           elif query.upper().startswith("SHOW COLUMNS"):
             table = query.split(" ")[-1].split(".")[-1].strip("`")
-            self.show_columns(table)
+            self.send_resultset(self.db.show_columns(table))
           elif query.upper().startswith("SHOW FULL COLUMNS"):
             table = query.split(" ")[-1].split(".")[-1].strip("`")
-            self.show_columns(table, True)
+            self.send_resultset(self.db.show_columns(table, True))
           elif query.upper().startswith("SHOW CREATE TABLE"):
             name = query.split(" ")[-1].split(".")[-1].strip("`")
-            self.show_create_table(name)
-          elif query.upper().startswith("SHOW VARIABLES"):
-            self.show_variables()
+            self.send_resultset(self.db.show_create_table(name))
+          elif query.upper().startswith("SHOW INDEX"):
+            table = query.split(" ")[-1].split(".")[-1].strip("`")
+            self.send_resultset(self.db.show_indexes(table))
+          elif query.upper().startswith("SHOW VARIABLES") or \
+            query.upper().startswith("SHOW STATUS"):
+            self.send_resultset(self.db.show_variables())
+          elif query.upper().startswith("SHOW ENGINES"):
+            self.send_resultset(self.db.show_engines())
+          elif query.upper().startswith("SHOW COLLATION"):
+            self.send_resultset(self.db.show_collation())
+          elif query.upper().startswith("SHOW CHARACTER SET"):
+            self.send_resultset(self.db.show_charset())
           elif query.upper().startswith("SHOW"):
             self.send_ok()
           elif query.upper().startswith("SET"):
             self.send_ok()
+          elif query.upper().startswith("USE"):
+            self.schema = query.split(" ")[-1].strip("`")
+            print("USE DATABASE", self.schema)
+            self.send_ok()
+          elif query.upper().startswith("CREATE") or \
+              query.upper().startswith("ALTER") or \
+              query.upper().startswith("DROP") or \
+              query.upper().startswith("RENAME") or \
+              query.upper().startswith("TRUNCATE") or \
+              query.upper().startswith("LOAD") or \
+              query.upper().startswith("INSERT") or \
+              query.upper().startswith("UPDATE") or \
+              query.upper().startswith("REPLACE") or \
+              query.upper().startswith("DELETE") or \
+              query.upper().startswith("GRANT") or \
+              query.upper().startswith("REVOKE") or \
+              query.upper().startswith("ANALYZE") or \
+              query.upper().startswith("OPTIMIZE") or \
+              query.upper().startswith("REPAIR"):
+            message = "Access denied for user '%s'@'%s' to database '%s'" % \
+              self.username, self.client_address[0], self.db.name
+            self.send_error(message, 1044)
           else:
             try:
-              self.execute(query)
+              self.send_resultset(self.db.execute(query))
             except Exception as e:
               self.send_error(str(e))
         elif command == Command.INIT_DB:
@@ -246,7 +255,6 @@ class Server(StreamRequestHandler):
           print("USE DATABASE", self.schema)
           self.send_ok()
         elif command == Command.QUIT:
-          self.connected = False
           print(self.thread, "BYE...")
           break
         elif command == Command.PING:
