@@ -4,7 +4,7 @@ from io import BytesIO
 
 def pack_string(value=None):
   if value is not None and len(value) > 0:
-    return pack("<B%ds" % len(value), len(value), value.encode())
+    return pack_varinteger(len(value)) + pack_fixedstring(value)
   else:
     return pack_padding()
 

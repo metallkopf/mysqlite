@@ -22,7 +22,6 @@ class Capability(IntFlag):
   MULTI_RESULTS = 131072 # Enable/disable multi-results
 
 class Command(IntEnum):
-  SLEEP = 0
   QUIT = 1
   INIT_DB = 2
   QUERY = 3
@@ -33,16 +32,12 @@ class Command(IntEnum):
   SHUTDOWN = 8
   STATISTICS = 9
   PROCESS_INFO = 10
-  CONNECT = 11
   PROCESS_KILL = 12
   DEBUG = 13
   PING = 14
-  TIME = 15
-  DELAYED_INSERT = 16
   CHANGE_USER = 17
   BINLOG_DUMP = 18
   TABLE_DUMP = 19
-  CONNECT_OUT = 20
   REGISTER_SLAVE = 21
   PREPARE = 22
   EXECUTE = 23

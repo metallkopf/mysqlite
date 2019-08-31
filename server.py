@@ -5,12 +5,12 @@ from threading import current_thread
 from binascii import hexlify
 from io import BytesIO
 from database import Database
+from sqlparse import parse
 from definitions import *
 from utils import *
 
 
 PROTOCOL_VERSION = 10
-SERVER_VERSION = "4.1.25" # last 4.1 release
 SERVER_CAPABILITIES = Capability.LONG_PASSWORD | Capability.FOUND_ROWS | \
   Capability.LONG_FLAG | Capability.NO_SCHEMA | Capability.PROTOCOL_41 | \
     Capability.SECURE_CONNECTION
@@ -48,7 +48,6 @@ class Server(StreamRequestHandler):
 
     self.wfile.write(header.getvalue())
     self.wfile.write(payload)
-    #self.wfile.flush()
     print("", hexlify(payload).decode())
     print("", payload)
 
@@ -57,7 +56,7 @@ class Server(StreamRequestHandler):
 
     payload = BytesIO()
     payload.write(pack_byte(PROTOCOL_VERSION)) # protocol version
-    payload.write(pack_nullstring(SERVER_VERSION)) # server version
+    payload.write(pack_nullstring(self.db.version)) # server version
     payload.write(pack_long(self.thread)) # connection id
     payload.write(pack_padding(8)) # auth-plugin-data-part-1
     payload.write(pack_padding()) # filler
@@ -91,12 +90,25 @@ class Server(StreamRequestHandler):
     self.send_packet(payload)
 
   def send_eof(self, warnings=0):
-   payload = BytesIO()
-   payload.write(pack_byte(0xfe))
-   payload.write(pack_integer(warnings))
-   payload.write(pack_integer(SERVER_STATUS))
+    payload = BytesIO()
+    payload.write(pack_byte(0xfe)) # header
+    payload.write(pack_integer(warnings)) # warnings
+    payload.write(pack_integer(SERVER_STATUS))
 
-   self.send_packet(payload)
+    self.send_packet(payload)
+
+  def send_error(self, message):
+    payload = BytesIO()
+    payload.write(pack_byte(0xff)) # header
+    payload.write(pack_integer(1064)) # error_code
+
+    if SERVER_CAPABILITIES & Capability.PROTOCOL_41:
+      payload.write(pack_fixedstring("#")) # sql_state_marker
+      payload.write(pack_fixedstring("42000")) # sql_state
+
+    payload.write(pack_fixedstring(message)) # error_message
+
+    self.send_packet(payload)
 
   def send_columndef(self, name, length, field, table=""):
     payload = BytesIO()
@@ -128,7 +140,7 @@ class Server(StreamRequestHandler):
 
     for name, field in meta:
       field = self.db.internal_type(field)
-      length = 20 if field == FieldType.VAR_STRING else 255
+      length = 20 if field == FieldType.VAR_STRING else 2 ** 16 - 1
 
       self.send_columndef(name, length, field)
 
@@ -152,12 +164,20 @@ class Server(StreamRequestHandler):
     meta, data = self.db.show_tables()
     self.send_resultset(meta, data)
 
-  def show_columns(self, table):
-    meta, data = self.db.show_columns(table)
+  def show_create_table(self, name):
+    meta, data = self.db.show_create_table(name)
     self.send_resultset(meta, data)
 
-  def exec_query(self, sql):
-    meta, data = self.db.exec_query(sql)
+  def show_columns(self, table, full=False):
+    meta, data = self.db.show_columns(table, full)
+    self.send_resultset(meta, data)
+
+  def show_variables(self):
+    meta, data = self.db.show_variables()
+    self.send_resultset(meta, data)
+
+  def execute(self, sql):
+    meta, data = self.db.execute(sql)
     self.send_resultset(meta, data)
 
   def handle(self):
@@ -194,7 +214,7 @@ class Server(StreamRequestHandler):
         command = read_data(payload, "<B")[0]
 
         if command == Command.QUERY:
-          query = read_string(payload)
+          query = read_string(payload).strip()
           print(self.thread, "QUERY:", query)
 
           if query.upper() == "SHOW DATABASES":
@@ -202,13 +222,25 @@ class Server(StreamRequestHandler):
           elif query.upper() == "SHOW TABLES":
             self.show_tables()
           elif query.upper().startswith("SHOW COLUMNS"):
-            self.show_columns("albums")
-          elif query.upper().startswith("SELECT"):
-            self.exec_query(query)
-          elif query.upper().startswith("SET "):
+            table = query.split(" ")[-1].split(".")[-1].strip("`")
+            self.show_columns(table)
+          elif query.upper().startswith("SHOW FULL COLUMNS"):
+            table = query.split(" ")[-1].split(".")[-1].strip("`")
+            self.show_columns(table, True)
+          elif query.upper().startswith("SHOW CREATE TABLE"):
+            name = query.split(" ")[-1].split(".")[-1].strip("`")
+            self.show_create_table(name)
+          elif query.upper().startswith("SHOW VARIABLES"):
+            self.show_variables()
+          elif query.upper().startswith("SHOW"):
+            self.send_ok()
+          elif query.upper().startswith("SET"):
             self.send_ok()
           else:
-            self.send_ok()
+            try:
+              self.execute(query)
+            except Exception as e:
+              self.send_error(str(e))
         elif command == Command.INIT_DB:
           self.schema = read_string(payload)
           print("USE DATABASE", self.schema)
@@ -217,5 +249,8 @@ class Server(StreamRequestHandler):
           self.connected = False
           print(self.thread, "BYE...")
           break
+        elif command == Command.PING:
+          print(self.thread, "PING...")
+          self.send_ok()
         else:
-          pass
+          self.send_error()
