@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from apsw import Connection, SQLITE_ACCESS_READ, sqlitelibversion
+from apsw import Connection, SQLITE_ACCESS_READ, sqlitelibversion, ExecutionCompleteError
 from os.path import isfile, basename, splitext
 from definitions import *
 
@@ -106,4 +106,7 @@ class Database:
   def execute(self, query, params=None):
     result = self._exec(query, params)
 
-    return result.getdescription(), result.fetchall()
+    try:
+      return result.getdescription(), result.fetchall()
+    except ExecutionCompleteError:
+      return (), []
