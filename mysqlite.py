@@ -2,8 +2,9 @@
 
 from socketserver import ThreadingTCPServer
 from argparse import ArgumentParser
-from server import Server
+from os.path import isfile
 from logging import basicConfig, DEBUG, INFO, info
+from server import Server
 
 
 if __name__ == "__main__":
@@ -13,6 +14,9 @@ if __name__ == "__main__":
   parser.add_argument("--port", default=3306)
   parser.add_argument("--debug", action="store_true")
   args = parser.parse_args()
+
+  if not isfile(args.path):
+    raise FileNotFoundError(args.path)
 
   level = DEBUG if args.debug else INFO
   basicConfig(format="%(threadName)s %(levelname).3s %(message)s", level=level)

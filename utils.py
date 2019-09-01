@@ -66,3 +66,7 @@ def read_string(payload):
     buffer.write(character)
 
   return buffer.getvalue().decode("utf-8")
+
+def read_varstring(payload):
+  length = read_data(payload, "<B")[0]
+  return read_data(payload, "%ds" % length)[0]

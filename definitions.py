@@ -2,24 +2,16 @@ from enum import IntFlag, IntEnum
 
 
 class Capability(IntFlag):
-  LONG_PASSWORD = 1 # new more secure passwords
-  FOUND_ROWS = 2 # Found instead of affected rows
-  LONG_FLAG = 4 # Get all column flags
-  CONNECT_WITH_DB = 8 # One can specify db on connect
-  NO_SCHEMA = 16 # Don't allow database.table.column
-  COMPRESS = 32 # Can use compression protocol
-  ODBC = 64 # Odbc client
-  LOCAL_FILES = 128 # Can use LOAD DATA LOCAL
-  IGNORE_SPACE = 256 # Ignore spaces before '('
-  PROTOCOL_41 = 512 # New 4.1 protocol
-  INTERACTIVE = 1024 # This is an interactive client
-  SSL = 2048 # Switch to SSL after handshake
-  IGNORE_SIGPIPE = 4096 # IGNORE sigpipes
-  TRANSACTIONS = 8192 # Client knows about transactions
-  RESERVED = 16384 # Old flag for 4.1 protocol
-  SECURE_CONNECTION = 32768 # New 4.1 authentication
-  MULTI_STATEMENTS = 65536 # Enable/disable multi-stmt support
-  MULTI_RESULTS = 131072 # Enable/disable multi-results
+  LONG_PASSWORD = 0x1 # new more secure passwords
+  FOUND_ROWS = 0x2 # Found instead of affected rows
+  LONG_FLAG = 0x4 # Get all column flags
+  CONNECT_WITH_DB = 0x8 # One can specify db on connect
+  NO_SCHEMA = 0x10 # Don't allow database.table.column
+  PROTOCOL_41 = 0x200 # New 4.1 protocol
+  INTERACTIVE = 0x400 # This is an interactive client
+  TRANSACTIONS = 0x2000 # Client knows about transactions
+  SECURE_CONNECTION = 0x8000 # New 4.1 authentication
+  CONNECT_ATTRS = 0x100000 # Supports connection attributes
 
 class Command(IntEnum):
   QUIT = 1

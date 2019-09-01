@@ -26,6 +26,7 @@ class Server(StreamRequestHandler):
   capabilities = 0
   max_packet = 0
   charset = 0
+  attributes = {}
   username = ""
   schema = ""
 
@@ -80,7 +81,7 @@ class Server(StreamRequestHandler):
     payload.write(pack_varinteger(affected_rows)) # affected_rows
     payload.write(pack_varinteger(last_insert_id)) # last_insert_id
 
-    if CAPABILITIES & Capability.PROTOCOL_41:
+    if self.capabilities & Capability.PROTOCOL_41:
       payload.write(pack_integer(STATUS)) # status_flags
       payload.write(pack_integer(warnings)) # warnings
 
@@ -107,6 +108,10 @@ class Server(StreamRequestHandler):
 
     self.send_packet(payload)
 
+  def send_unsupported(self, error):
+    message = "This version of SQLite doesn't yet support '%s'" % error
+    self.send_error(message, 1235)
+
   def send_columndef(self, name, length, field):
     payload = BytesIO()
 
@@ -114,8 +119,8 @@ class Server(StreamRequestHandler):
     collation = Charset.BINARY if field == FieldType.LONGLONG else Charset.UTF8_GENERAL_CI
 
     payload.write(pack_string("def")) # catalog
-    payload.write(pack_string("")) # schema
-    payload.write(pack_string("")) # table
+    payload.write(pack_padding()) # schema
+    payload.write(pack_padding()) # table
 
     payload.write(pack_padding()) # org_table
 
@@ -160,13 +165,15 @@ class Server(StreamRequestHandler):
     self.username = read_string(payload)
 
     if self.capabilities & Capability.SECURE_CONNECTION:
-      length = read_data(payload, "<b")[0]
-      read_data(payload, "%ds" % length)[0]
+      read_varstring(payload)
     else:
       read_string(payload)
 
     if self.capabilities & Capability.CONNECT_WITH_DB:
       self.schema = read_string(payload)
+
+    if self.capabilities & Capability.CONNECT_ATTRS:
+      pass
 
     if True:
       self.send_ok()
@@ -174,6 +181,17 @@ class Server(StreamRequestHandler):
     else:
       pass
 
+  def use_database(self, name):
+    if name in self.db.get_databases():
+      self.send_ok()
+      self.schema = name
+    else:
+      message = "Access denied for user '%s'@'%s' to database '%s'" % \
+        (self.username, self.client_address[0], name)
+      self.send_error(message, 1044)
+
+  def _extract_last(self, query):
+    return query.split(" ")[-1].split(".")[-1].strip("`").strip("[]")
 
   def handle(self):
     self.db = Database(self.server.path)
@@ -206,16 +224,16 @@ class Server(StreamRequestHandler):
           elif query.upper() == "SHOW TABLES":
             self.send_resultset(self.db.show_tables())
           elif query.upper().startswith("SHOW COLUMNS"):
-            table = query.split(" ")[-1].split(".")[-1].strip("`")
+            table = self._extract_last(query)
             self.send_resultset(self.db.show_columns(table))
           elif query.upper().startswith("SHOW FULL COLUMNS"):
-            table = query.split(" ")[-1].split(".")[-1].strip("`")
+            table = self._extract_last(query)
             self.send_resultset(self.db.show_columns(table, True))
           elif query.upper().startswith("SHOW CREATE TABLE"):
-            name = query.split(" ")[-1].split(".")[-1].strip("`")
+            name = self._extract_last(query)
             self.send_resultset(self.db.show_create_table(name))
           elif query.upper().startswith("SHOW INDEX"):
-            table = query.split(" ")[-1].split(".")[-1].strip("`")
+            table = self._extract_last(query)
             self.send_resultset(self.db.show_indexes(table))
           elif query.upper().startswith("SHOW VARIABLES") or \
             query.upper().startswith("SHOW STATUS"):
@@ -231,26 +249,14 @@ class Server(StreamRequestHandler):
           elif query.upper().startswith("SET"):
             self.send_ok()
           elif query.upper().startswith("USE"):
-            self.schema = query.split(" ")[-1].strip("`")
-            info("USE DATABASE %s", self.schema)
-            self.send_ok()
-          elif query.upper().startswith("CREATE") or \
-              query.upper().startswith("ALTER") or \
-              query.upper().startswith("DROP") or \
-              query.upper().startswith("RENAME") or \
-              query.upper().startswith("TRUNCATE") or \
-              query.upper().startswith("LOAD") or \
-              query.upper().startswith("INSERT") or \
-              query.upper().startswith("UPDATE") or \
-              query.upper().startswith("REPLACE") or \
-              query.upper().startswith("DELETE") or \
-              query.upper().startswith("GRANT") or \
-              query.upper().startswith("REVOKE") or \
-              query.upper().startswith("ANALYZE") or \
-              query.upper().startswith("OPTIMIZE") or \
-              query.upper().startswith("REPAIR"):
+            name = self._extract_last(query)
+            info("USE DATABASE %s", name)
+            self.use_database(name)
+          elif query.upper().split(" ")[0] in ["CREATE", "ALTER", "DROP", \
+              "RENAME", "TRUNCATE", "LOAD", "INSERT", "UPDATE", "REPLACE", \
+              "DELETE", "GRANT", "REVOKE", "ANALYZE", "OPTIMIZE", "REPAIR"]:
             message = "Access denied for user '%s'@'%s' to database '%s'" % \
-              self.username, self.client_address[0], self.db.name
+              (self.username, self.client_address[0], self.schema)
             self.send_error(message, 1044)
           else:
             try:
@@ -258,9 +264,9 @@ class Server(StreamRequestHandler):
             except Exception as e:
               self.send_error(str(e))
         elif command == Command.INIT_DB:
-          self.schema = read_string(payload)
-          info("USE DATABASE %s", self.schema)
-          self.send_ok()
+          name = read_string(payload)
+          info("USE DATABASE %s", name)
+          self.use_database(name)
         elif command == Command.QUIT:
           info("BYE...")
           break
