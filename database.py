@@ -13,7 +13,10 @@ class Database:
     self.version = sqlitelibversion() + "-SQLite"
 
   def _execute(self, query, params=None):
-    return self.inst.cursor().execute(query, params)
+    cursor = self.inst.cursor()
+    cursor.setexectrace(self._exectrace) # save getdescription columns
+
+    return cursor.execute(query, params)
 
   def get_databases(self):
     return ["main"]
@@ -178,10 +181,14 @@ class Database:
 
     return meta, data
 
+  def _exectrace(self, cursor, sql, bindings):
+    self._meta = cursor.getdescription()
+    return True
+
   def execute(self, query, params=None):
     result = self._execute(query, params)
 
     try:
       return result.getdescription(), result.fetchall() # FIXME un-optimized
     except ExecutionCompleteError:
-      return (), [] # NOTE don't fail on empty resultset
+      return self._meta, [] # NOTE don't fail on empty resultset
