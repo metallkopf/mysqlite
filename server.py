@@ -40,9 +40,8 @@ class Server(StreamRequestHandler):
       self.packet_number = 0
     info("SENDING [%d] (%d)...", self.packet_number, len(payload))
 
-    self.wfile.write(pack_integer(len(payload)))
-    self.wfile.write(pack_padding())
-    self.wfile.write(pack_byte(self.packet_number))
+    header = len(payload) | self.packet_number << 24
+    self.wfile.write(pack_long(header))
     self.wfile.write(payload)
 
     debug(hexlify(payload).decode())
