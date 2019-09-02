@@ -14,6 +14,7 @@ class Capability(IntFlag):
   CONNECT_ATTRS = 0x100000 # Supports connection attributes
 
 class Command(IntEnum):
+  SLEEP = 0
   QUIT = 1
   INIT_DB = 2
   QUERY = 3
@@ -24,20 +25,24 @@ class Command(IntEnum):
   SHUTDOWN = 8
   STATISTICS = 9
   PROCESS_INFO = 10
+  CONNECT = 11
   PROCESS_KILL = 12
   DEBUG = 13
   PING = 14
+  TIME = 15
+  DELAYED_INSERT = 16
   CHANGE_USER = 17
   BINLOG_DUMP = 18
   TABLE_DUMP = 19
+  CONNECT_OUT = 20
   REGISTER_SLAVE = 21
-  PREPARE = 22
-  EXECUTE = 23
-  LONG_DATA = 24
-  CLOSE_STMT = 25
-  RESET_STMT = 26
+  STMT_PREPARE = 22
+  STMT_EXECUTE = 23
+  STMT_SEND_LONG_DATA = 24
+  STMT_CLOSE = 25
+  STMT_RESET = 26
   SET_OPTION = 27
-  END = 28
+  STMT_FETCH = 28
 
 class Status(IntFlag):
   IN_TRANS = 1 # Transaction has started

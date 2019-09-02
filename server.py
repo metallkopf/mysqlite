@@ -94,20 +94,20 @@ class Server(StreamRequestHandler):
 
     self.send_packet(payload)
 
-  def send_error(self, message="", error=1064):
+  def send_error(self, message="", error=1064, state="42000"):
     payload = BytesIO()
     payload.write(pack_byte(0xff)) # header
     payload.write(pack_integer(error)) # error_code
 
     if self.capabilities & Capability.PROTOCOL_41:
       payload.write(pack_fixedstring("#")) # sql_state_marker
-      payload.write(pack_fixedstring("42000")) # sql_state
+      payload.write(pack_fixedstring(state)) # sql_state
 
     payload.write(pack_fixedstring(message)) # error_message
 
     self.send_packet(payload)
 
-  def send_unsupported(self, error):
+  def send_unsupported(self, error=""):
     message = "This version of SQLite doesn't yet support '%s'" % error
     self.send_error(message, 1235)
 
@@ -168,17 +168,15 @@ class Server(StreamRequestHandler):
     else:
       read_string(payload)
 
+    database = ""
+
     if self.capabilities & Capability.CONNECT_WITH_DB:
-      self.schema = read_string(payload)
-
-    if self.capabilities & Capability.CONNECT_ATTRS:
-      pass
-
-    if True:
-      self.send_ok()
-      self.connected = True
+      database = read_string(payload)
+      self.use_database(database)
     else:
-      pass
+      self.send_ok()
+
+    self.connected = True
 
   def use_database(self, name):
     if name in self.db.get_databases():
@@ -217,46 +215,49 @@ class Server(StreamRequestHandler):
         if command == Command.QUERY:
           query = read_string(payload).strip().strip(";")
           info("QUERY: %s", query)
+          keywords = query.upper().split(" ", 3)
 
-          if query.upper() == "SHOW DATABASES":
+          if keywords[:2] == ["SHOW", "DATABASES"]:
             self.send_resultset(self.db.show_databases())
-          elif query.upper() == "SHOW TABLES":
+          elif keywords[:2] == ["SHOW", "TABLES"]:
             self.send_resultset(self.db.show_tables())
-          elif query.upper().startswith("SHOW COLUMNS"):
+          elif keywords[:2] == ["SHOW", "COLUMNS"]:
             table = self._extract_last(query)
             self.send_resultset(self.db.show_columns(table))
-          elif query.upper().startswith("SHOW FULL COLUMNS"):
+          elif keywords[:3] == ["SHOW", "FULL", "COLUMNS"]:
             table = self._extract_last(query)
             self.send_resultset(self.db.show_columns(table, True))
-          elif query.upper().startswith("SHOW CREATE TABLE"):
+          elif keywords[:3] == ["SHOW", "CREATE", "TABLE"]:
             name = self._extract_last(query)
             self.send_resultset(self.db.show_create_table(name))
-          elif query.upper().startswith("SHOW INDEX"):
+          elif keywords[:2] == ["SHOW", "INDEX"]:
             table = self._extract_last(query)
             self.send_resultset(self.db.show_indexes(table))
-          elif query.upper().startswith("SHOW VARIABLES") or \
-            query.upper().startswith("SHOW STATUS"):
+          elif keywords[:2] == ["SHOW", "VARIABLES"] or \
+              keywords[:2] == ["SHOW", "STATUS"]:
             self.send_resultset(self.db.show_variables())
-          elif query.upper().startswith("SHOW ENGINES"):
+          elif keywords[:2] == ["SHOW", "ENGINES"]:
             self.send_resultset(self.db.show_engines())
-          elif query.upper().startswith("SHOW COLLATION"):
+          elif keywords[:2] == ["SHOW", "COLLATION"]:
             self.send_resultset(self.db.show_collation())
-          elif query.upper().startswith("SHOW CHARACTER SET"):
+          elif keywords[:3] == ["SHOW", "CHARACTER", "SET"]:
             self.send_resultset(self.db.show_charset())
-          elif query.upper().startswith("SHOW"):
+          elif keywords[0] == "SHOW" or keywords[0] == "SET":
             self.send_ok()
-          elif query.upper().startswith("SET"):
-            self.send_ok()
-          elif query.upper().startswith("USE"):
+          elif keywords[0] == "USE":
             name = self._extract_last(query)
             info("USE DATABASE %s", name)
             self.use_database(name)
-          elif query.upper().split(" ")[0] in ["CREATE", "ALTER", "DROP", \
-              "RENAME", "TRUNCATE", "LOAD", "INSERT", "UPDATE", "REPLACE", \
-              "DELETE", "GRANT", "REVOKE", "ANALYZE", "OPTIMIZE", "REPAIR"]:
+          elif keywords[0] in ["CREATE", "ALTER", "DROP", "RENAME",
+                               "TRUNCATE", "LOAD", "INSERT", "UPDATE",
+                               "REPLACE", "DELETE", "GRANT", "REVOKE",
+                               "ANALYZE", "OPTIMIZE", "REPAIR"]:
             message = "Access denied for user '%s'@'%s' to database '%s'" % \
               (self.username, self.client_address[0], self.schema)
             self.send_error(message, 1044)
+          elif keywords[0] == "HELP":
+            message = "Help database is corrupt or does not exist"
+            self.send_error(message, 1244, "HY000")
           else:
             try:
               self.send_resultset(self.db.execute(query))
@@ -273,4 +274,7 @@ class Server(StreamRequestHandler):
           info("PING...")
           self.send_ok()
         else:
-          self.send_error()
+          if command in Command.__members__.values():
+            self.send_unsupported(Command(command).name)
+          else:
+            self.send_unsupported("UNKNOWN")

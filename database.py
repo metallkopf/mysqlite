@@ -55,18 +55,38 @@ class Database:
   def show_variables(self):
     return (("Variable_name", "TEXT"), ("Value", "TEXT")), []
 
-  def _index_details(self, name):
-    query = "PRAGMA index_xinfo([%s])" % name
-    return self._execute(query).fetchone()
-
-  def _column_details(self, table, name):
-    query = "PRAGMA table_info([%s])" % table
+  def _index_list(self, table):
+    query = "PRAGMA index_list([%s])" % table
+    indexes = {}
 
     for row in self._execute(query):
-      if row[1] == name:
-        return row
+      if row[3] == "c":
+        continue
 
-    return None
+      query = "PRAGMA index_xinfo([%s])" % row[1]
+      details = self._execute(query).fetchone()
+
+      indexes[details[2]] = {"index": row[1], "unique": bool(row[2]),
+                             "order": 1 if details[3] == 0 else -1}
+
+    return indexes
+
+  def _column_list(self, table):
+    indexes = self._index_list(table)
+    query = "PRAGMA table_info([%s])" % table
+    columns = []
+
+    for row in self._execute(query):
+      column = {"name": row[1], "type": row[2], "null": bool(~row[3]),
+                "default": row[4], "primary": bool(row[5]), "index": False,
+                "unique": None, "order": None}
+
+      if row[1] in indexes:
+        column.update(indexes[row[1]])
+
+      columns.append(column)
+
+    return columns
 
   def _calc_cardinality(self, table, column):
     query = "SELECT COUNT(DISTINCT([%s])) FROM [%s]" % (column, table)
@@ -81,21 +101,18 @@ class Database:
             ("Comment", "TEXT"), ("Index_comment", "TEXT"))
     data = []
 
-    query = "PRAGMA index_list([%s])" % table
+    columns = self._column_list(table)
 
-    for row in self._execute(query):
-      if row[3] != "c":
+    for column in columns:
+      if not column["index"]:
         continue
 
-      index = self._index_details(row[1])
-      column = self._column_details(table, index[2])
-
-      unique = int(row[2])
-      key = "PRIMARY" if column[5] == 1 else row[1]
-      name = index[2]
-      collation = "A" if index[3] == 0 else None
-      cardinality = self._calc_cardinality(table, index[2])
-      null = "YES" if column[3] == 0 else None
+      unique = int(column["unique"])
+      key = "PRIMARY" if column["primary"] else column["index"]
+      name = column["name"]
+      collation = "A" if column["order"] == 1 else None
+      cardinality = self._calc_cardinality(table, column["name"])
+      null = "YES" if column["null"] else None
 
       item = (table, unique, key, 1, name, collation, cardinality,
               None, None, null, "BTREE", "", "")
@@ -150,29 +167,19 @@ class Database:
               ("Null", "TEXT"), ("Key", "TEXT"), ("Default", "TEXT"),
               ("Extra", "TEXT"), ("Privileges", "TEXT"), ("Comment", "TEXT"))
 
-    query = "PRAGMA index_list([%s])" % name
-    indexes = {}
+    columns = self._column_list(name)
 
-    for row in self._execute(query):
-      if row[3] == "c":
-        continue
-
-      index = self._index_details(row[1])
-      indexes[index[3]] = bool(row[2])
-
-    query = "PRAGMA table_info([%s])" % name
-
-    for row in self._execute(query):
-      name = row[1]
-      key = "PRI" if row[5] == 1 else ""
-      null = "YES" if row[3] == 0 else "NO"
-      extra = "auto_increment" if key == "PRI" and null == "NO" and row[2] == "INTEGER" else ""
-      default = row[4]
-      field = self.visible_type(row[2])
+    for column in columns:
+      name = column["name"]
+      key = "PRI" if column["primary"] == 1 else ""
+      null = "YES" if column["null"] else "NO"
+      extra = "auto_increment" if key == "PRI" and null == "NO" and column["type"] == "INTEGER" else ""
+      default = column["default"]
+      field = self.visible_type(column["type"])
       collation = "utf8_general_ci" if field != "text" else ""
 
-      if key == "" and name in indexes:
-        key = "UNI" if indexes[name] else "MUL"
+      if key == "" and column["index"]:
+        key = "UNI" if column["unique"] else "MUL"
 
       if not full:
         data.append([name, field, null, key, default, extra])
