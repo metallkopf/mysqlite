@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 from apsw import Connection, SQLITE_ACCESS_READ, sqlitelibversion, ExecutionCompleteError
+from re import match
 from definitions import *
 
 
@@ -49,8 +50,44 @@ class Database:
     return meta, data
 
   def show_create_table(self, name):
-    query = "SELECT name AS [Table], sql AS [Create Table] FROM sqlite_master WHERE type = 'table' AND name = ?"
-    return self.execute(query, (name, ))
+    meta = (("Table", "TEXT"), ("Create Table", "TEXT"))
+    lines = []
+    primaries = []
+    constraints = []
+
+    for column in self._column_list(name):
+      line = "  %s" % column["name"]
+      line += " %s" % column["type"]
+
+      if not column["null"]:
+        line += " NOT NULL"
+
+      if column["default"] is not None:
+        line += " DEFAULT '%s'" % column["default"]
+
+      if "INT" in column["type"].upper() and column["primary"] and \
+         not column["null"]:
+        line += " AUTO_INCREMENT"
+
+      lines.append(line)
+
+      if column["primary"]:
+        primaries.append(column["name"])
+
+      if column["foreign"]:
+        line = "  FOREIGN KEY (%s) REFERENCES %s(%s)" % (column["name"],
+                                                        column["table"],
+                                                        column["foreign"])
+        constraints.append(line)
+
+    if primaries:
+      lines.append("  PRIMARY KEY (%s)" % ", ".join(primaries))
+
+    lines.extend(constraints)
+
+    definition = "CREATE TABLE %s (\n%s\n)" % (name, ",\n".join(lines))
+
+    return meta, [[name, definition]]
 
   def show_variables(self):
     return (("Variable_name", "TEXT"), ("Value", "TEXT")), []
@@ -60,9 +97,6 @@ class Database:
     indexes = {}
 
     for row in self._execute(query):
-      if row[3] == "c":
-        continue
-
       query = "PRAGMA index_xinfo([%s])" % row[1]
       details = self._execute(query).fetchone()
 
@@ -71,18 +105,33 @@ class Database:
 
     return indexes
 
+  def _foreign_list(self, table):
+    query = "PRAGMA foreign_key_list([%s])" % table
+    foreigns = {}
+
+    for row in self._execute(query):
+      foreigns[row[3]] = {"table": row[2], "foreign": row[4],
+                          "update": row[5], "delete": row[6]}
+
+    return foreigns
+
   def _column_list(self, table):
     indexes = self._index_list(table)
+    foreigns = self._foreign_list(table)
     query = "PRAGMA table_info([%s])" % table
     columns = []
 
     for row in self._execute(query):
-      column = {"name": row[1], "type": row[2], "null": bool(~row[3]),
-                "default": row[4], "primary": bool(row[5]), "index": False,
-                "unique": None, "order": None}
+      column = {"name": row[1], "type": row[2], "null": row[3] == 0,
+                "default": None if row[4] == "NULL" else row[4],
+                "primary": bool(row[5]), "index": False, "unique": None,
+                "order": None, "table": None, "foreign": None,
+                "update": None, "delete": None}
 
       if row[1] in indexes:
         column.update(indexes[row[1]])
+      if row[1] in foreigns:
+        column.update(foreigns[row[1]])
 
       columns.append(column)
 
@@ -107,7 +156,7 @@ class Database:
       if not column["index"]:
         continue
 
-      unique = int(column["unique"])
+      unique = int(not column["unique"])
       key = "PRIMARY" if column["primary"] else column["index"]
       name = column["name"]
       collation = "A" if column["order"] == 1 else None
@@ -139,21 +188,49 @@ class Database:
     return meta, data
 
   def visible_type(self, name):
-    name = name.upper()
-    if "INT" in name:
-      return "int"
+    field, length, decimals = self.internal_type(name)
+
+    if field == FieldType.LONGLONG:
+      return "int(%d)" % length
+    elif field == FieldType.DECIMAL:
+      return "decimal(%d,%d)" % (length, decimals)
+    elif field == FieldType.DOUBLE:
+      return "double(%d,%d)" % (length, decimals)
+    elif field == FieldType.VAR_STRING:
+      return "varchar(%d)" % length
     else:
       return "text"
 
   def internal_type(self, name):
     if name is None:
-      return FieldType.VAR_STRING
+      return FieldType.BLOB
 
     name = name.upper()
-    if "INT" in name:
-      return FieldType.LONGLONG
+    field = name
+    length = 0
+    decimals = 0
+
+    results = match("(\w+)\((\d+),(\d+)\)", name)
+    if results:
+      field, length, decimals = results.groups()
     else:
-      return FieldType.VAR_STRING
+      results = match("(\w+)\((\d+)\)", name)
+      if results:
+        field, length = results.groups()
+
+    length = int(length)
+    decimals = int(decimals)
+
+    if "INT" in name:
+      return FieldType.LONGLONG, 21, 0
+    elif "DECIMAL" in name or "NUMERIC" in name:
+     return FieldType.DECIMAL, length + decimals, decimals
+    elif "FLOAT" in name or "DOUBLE" in name or "REAL" in name:
+     return FieldType.DOUBLE, length, decimals
+    elif "CHAR" in name and length > 0:
+      return FieldType.VAR_STRING, length, 0x1f
+    else:
+      return FieldType.BLOB, 2 ** 16 - 1, 0x1f
 
   def show_columns(self, name, full=False):
     meta = None
@@ -174,7 +251,7 @@ class Database:
       key = "PRI" if column["primary"] == 1 else ""
       null = "YES" if column["null"] else "NO"
       extra = "auto_increment" if key == "PRI" and null == "NO" and column["type"] == "INTEGER" else ""
-      default = column["default"]
+      default = "NULL" if column["default"] is None else column["default"]
       field = self.visible_type(column["type"])
       collation = "utf8_general_ci" if field != "text" else ""
 

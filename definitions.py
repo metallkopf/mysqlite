@@ -73,9 +73,6 @@ class FieldType(IntEnum):
   DATETIME = 0x0c
   YEAR = 0x0d
   NEWDATE = 0x0e
-  VARCHAR = 0x0f
-  BIT = 0x10
-  NEWDECIMAL = 0xf6
   ENUM = 0xf7
   SET = 0xf8
   TINY_BLOB = 0xf9
@@ -99,4 +96,3 @@ class FieldFlag(IntFlag):
   AUTO_INCREMENT = 512 # field is a autoincrement field
   TIMESTAMP = 1024 # Field is a timestamp
   SET = 2048 # field is a set
-  NUM = 32768 # Field is num (for clients)

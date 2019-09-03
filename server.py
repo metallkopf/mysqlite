@@ -7,8 +7,9 @@ from io import BytesIO
 from database import Database
 from sqlparse import parse
 from definitions import *
-from utils import *
 from logging import debug, info, warning, error
+from traceback import print_exc
+from utils import *
 
 
 CAPABILITIES = Capability.LONG_PASSWORD | Capability.FOUND_ROWS | \
@@ -44,7 +45,6 @@ class Server(StreamRequestHandler):
     self.wfile.write(pack_long(header))
     self.wfile.write(payload)
 
-    debug(hexlify(payload).decode())
     debug(payload)
 
   def send_handshake(self):
@@ -111,11 +111,15 @@ class Server(StreamRequestHandler):
     message = "This version of SQLite doesn't yet support '%s'" % error
     self.send_error(message, 1235)
 
-  def send_columndef(self, name, length, field):
+  def send_columndef(self, name, field, length, decimals):
     payload = BytesIO()
 
-    decimals = 0 if field == FieldType.LONGLONG else 0x1f
-    collation = Charset.BINARY if field == FieldType.LONGLONG else Charset.UTF8_GENERAL_CI
+    collation = Charset.UTF8_GENERAL_CI if field == FieldType.VAR_STRING else Charset.BINARY
+
+    if field in [FieldType.DECIMAL, FieldType.DOUBLE]: # total length
+      length += decimals
+    elif field == FieldType.VAR_STRING: # utf8 = char * 3
+      length *= 3
 
     payload.write(pack_string("def")) # catalog
     payload.write(pack_padding()) # schema
@@ -141,10 +145,9 @@ class Server(StreamRequestHandler):
     self.send_packet(pack_byte(len(meta)))
 
     for name, field in meta:
-      field = self.db.internal_type(field)
-      length = 20 if field == FieldType.VAR_STRING else 2 ** 16 - 1
+      field, length, decimals = self.db.internal_type(field)
 
-      self.send_columndef(name, length, field)
+      self.send_columndef(name, field, length, decimals)
 
     self.send_eof()
 
@@ -204,7 +207,6 @@ class Server(StreamRequestHandler):
       payload.write(self.rfile.read(size))
       payload.seek(0)
 
-      debug(hexlify(payload.getvalue()).decode())
       debug(payload.getvalue())
 
       if not self.connected:
@@ -262,6 +264,7 @@ class Server(StreamRequestHandler):
             try:
               self.send_resultset(self.db.execute(query))
             except Exception as e:
+              print_exc()
               self.send_error(str(e))
         elif command == Command.INIT_DB:
           name = read_string(payload)
