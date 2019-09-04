@@ -21,8 +21,9 @@ STATUS = Status.AUTOCOMMIT
 
 class Server(StreamRequestHandler):
   db = None
-  packet_number = -1
+  number = -1
   connected = False
+  packet = None
 
   capabilities = 0
   max_packet = 0
@@ -31,21 +32,30 @@ class Server(StreamRequestHandler):
   username = ""
   schema = ""
 
-  def send_packet(self, payload):
+  def queue_packet(self, payload, send=False):
     if type(payload) is BytesIO:
       payload = payload.getvalue()
 
-    if self.packet_number < 255:
-      self.packet_number += 1
+    if self.number < 255:
+      self.number += 1
     else:
-      self.packet_number = 0
-    info("SENDING [%d] (%d)...", self.packet_number, len(payload))
+      self.number = 0
 
-    header = len(payload) | self.packet_number << 24
-    self.wfile.write(pack_long(header))
-    self.wfile.write(payload)
-
+    length = len(payload)
+    info("QUEUEING [%d] (%d)...", self.number, length)
+    header = length | self.number << 24
+    self.packet.write(pack_long(header))
+    self.packet.write(payload)
     debug(payload)
+
+    if send:
+      self.send_packets()
+
+  def send_packets(self):
+    info("SENDING (%d)...", self.packet.tell())
+    self.wfile.write(self.packet.getvalue())
+    self.packet.seek(0)
+    self.packet.truncate(0)
 
   def send_handshake(self):
     info("HELLO...")
@@ -55,7 +65,7 @@ class Server(StreamRequestHandler):
     payload.write(pack_byte(10)) # protocol version
     payload.write(pack_nullstring(self.db.version)) # server version
     payload.write(pack_long(thread)) # connection id
-    payload.write(pack_padding(8)) # auth-plugin-data-part-1
+    payload.write(pack_fixedstring(" " * 8)) # auth-plugin-data-part-1
     payload.write(pack_padding()) # filler
     payload.write(pack_integer(CAPABILITIES)) # capability flags
 
@@ -69,9 +79,10 @@ class Server(StreamRequestHandler):
 
     # auth-plugin-data-part-2
     if CAPABILITIES & Capability.SECURE_CONNECTION:
-      payload.write(pack_padding(13))
+      payload.write(pack_fixedstring(" " * 12))
+      payload.write(pack_padding())
 
-    self.send_packet(payload)
+    self.queue_packet(payload, True)
 
   def send_ok(self, affected_rows=0, last_insert_id=0, warnings=0):
     payload = BytesIO()
@@ -84,7 +95,7 @@ class Server(StreamRequestHandler):
       payload.write(pack_integer(STATUS)) # status_flags
       payload.write(pack_integer(warnings)) # warnings
 
-    self.send_packet(payload)
+    self.queue_packet(payload, True)
 
   def send_eof(self, warnings=0):
     payload = BytesIO()
@@ -92,7 +103,7 @@ class Server(StreamRequestHandler):
     payload.write(pack_integer(warnings)) # warnings
     payload.write(pack_integer(STATUS))
 
-    self.send_packet(payload)
+    self.queue_packet(payload)
 
   def send_error(self, message="", error=1064, state="42000"):
     payload = BytesIO()
@@ -105,7 +116,7 @@ class Server(StreamRequestHandler):
 
     payload.write(pack_fixedstring(message)) # error_message
 
-    self.send_packet(payload)
+    self.queue_packet(payload, True)
 
   def send_unsupported(self, error=""):
     message = "This version of SQLite doesn't yet support '%s'" % error
@@ -138,11 +149,11 @@ class Server(StreamRequestHandler):
     payload.write(pack_byte(decimals)) # decimals
     payload.write(pack_padding(2)) # filler
 
-    self.send_packet(payload)
+    self.queue_packet(payload)
 
   def send_resultset(self, data):
     meta, rows = data
-    self.send_packet(pack_byte(len(meta)))
+    self.queue_packet(pack_byte(len(meta)))
 
     for name, field in meta:
       field, length, decimals = self.db.internal_type(field)
@@ -157,9 +168,10 @@ class Server(StreamRequestHandler):
       for value in row:
         payload.write(pack_resstring(value))
 
-      self.send_packet(payload)
+      self.queue_packet(payload)
 
     self.send_eof()
+    self.send_packets()
 
   def handle_handshake(self, payload):
     self.capabilities, self.max_packet, self.charset = \
@@ -195,14 +207,15 @@ class Server(StreamRequestHandler):
 
   def handle(self):
     self.db = Database(self.server.path)
+    self.packet = BytesIO()
     self.send_handshake()
 
     while True:
       header = read_data(self.rfile, "<I")[0]
-      self.packet_number = header >> 24
-      size = self.packet_number << 24 ^ header
+      self.number = header >> 24
+      size = self.number << 24 ^ header
 
-      info("RECEIVING [%d] (%d)...", self.packet_number, size)
+      info("RECEIVING [%d] (%d)...", self.number, size)
       payload = BytesIO()
       payload.write(self.rfile.read(size))
       payload.seek(0)

@@ -74,8 +74,9 @@ class Database:
         primaries.append(column["name"])
 
       if column["index"]:
-        line = "%s KEY %s (%s)" % (" UNIQUE" if column["unique"] else "",
-                                   column["index"], column["name"])
+        line = "%s KEY %s (%s%s)" % (" UNIQUE" if column["unique"] else "",
+                                     column["index"], column["name"],
+                                     " ASC" if column["order"] == 1 else "")
         extra.append(line)
 
       if column["foreign"]:
