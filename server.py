@@ -217,7 +217,7 @@ class Server(StreamRequestHandler):
         if command == Command.QUERY:
           query = read_string(payload).strip().strip(";")
           info("QUERY: %s", query)
-          keywords = query.upper().split(" ", 3)
+          keywords = query.upper().split(" ", 4)
 
           if keywords[:2] == ["SHOW", "DATABASES"]:
             self.send_resultset(self.db.show_databases())
@@ -244,6 +244,11 @@ class Server(StreamRequestHandler):
             self.send_resultset(self.db.show_collation())
           elif keywords[:3] == ["SHOW", "CHARACTER", "SET"]:
             self.send_resultset(self.db.show_charset())
+          elif keywords[:4] == ["SHOW", "TABLE", "STATUS", "LIKE"]:
+            name = self._extract_last(query)
+            self.send_resultset(self.db.show_table_status(name))
+          elif keywords[:3] == ["SHOW", "TABLE", "STATUS"]:
+            self.send_resultset(self.db.show_table_status())
           elif keywords[0] == "SHOW" or keywords[0] == "SET":
             self.send_ok()
           elif keywords[0] == "USE":

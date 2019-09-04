@@ -53,20 +53,19 @@ class Database:
     meta = (("Table", "TEXT"), ("Create Table", "TEXT"))
     lines = []
     primaries = []
-    constraints = []
+    extra = []
 
     for column in self._column_list(name):
-      line = "  %s" % column["name"]
+      line = " %s" % column["name"]
       line += " %s" % column["type"]
 
-      if not column["null"]:
+      if not column["nullable"]:
         line += " NOT NULL"
 
       if column["default"] is not None:
         line += " DEFAULT '%s'" % column["default"]
 
-      if "INT" in column["type"].upper() and column["primary"] and \
-         not column["null"]:
+      if column["serial"]:
         line += " AUTO_INCREMENT"
 
       lines.append(line)
@@ -74,18 +73,24 @@ class Database:
       if column["primary"]:
         primaries.append(column["name"])
 
+      if column["index"]:
+        line = "%s KEY %s (%s)" % (" UNIQUE" if column["unique"] else "",
+                                   column["index"], column["name"])
+        extra.append(line)
+
       if column["foreign"]:
-        line = "  FOREIGN KEY (%s) REFERENCES %s(%s)" % (column["name"],
+        line = " FOREIGN KEY (%s) REFERENCES %s(%s)" % (column["name"],
                                                         column["table"],
                                                         column["foreign"])
-        constraints.append(line)
+        extra.append(line)
 
     if primaries:
-      lines.append("  PRIMARY KEY (%s)" % ", ".join(primaries))
+      lines.append(" PRIMARY KEY (%s)" % ", ".join(primaries))
 
-    lines.extend(constraints)
+    extra.sort(reverse=True)
+    lines.extend(extra)
 
-    definition = "CREATE TABLE %s (\n%s\n)" % (name, ",\n".join(lines))
+    definition = "CREATE TABLE %s (\n%s\n) ENGINE=SQLite" % (name, ",\n".join(lines))
 
     return meta, [[name, definition]]
 
@@ -122,11 +127,16 @@ class Database:
     columns = []
 
     for row in self._execute(query):
-      column = {"name": row[1], "type": row[2], "null": row[3] == 0,
+      column = {"name": row[1], "type": self.visible_type(row[2]),
+                "nullable": row[3] == 0, "primary": bool(row[5]),
                 "default": None if row[4] == "NULL" else row[4],
-                "primary": bool(row[5]), "index": False, "unique": None,
-                "order": None, "table": None, "foreign": None,
-                "update": None, "delete": None}
+                "index": False, "unique": None, "order": None,
+                "table": None, "foreign": None, "update": None,
+                "delete": None, "serial": False}
+
+      if "int" in column["type"] and column["primary"] and \
+          not column["nullable"]:
+        column["serial"] = True
 
       if row[1] in indexes:
         column.update(indexes[row[1]])
@@ -141,6 +151,23 @@ class Database:
     query = "SELECT COUNT(DISTINCT([%s])) FROM [%s]" % (column, table)
     return self._execute(query).fetchone()[0]
 
+  def _count_rows(self, table):
+    query = "SELECT COUNT(1) FROM [%s]" % table
+    return self._execute(query).fetchone()[0]
+
+  def _next_id(self, table):
+    primary = None
+
+    for column in self._column_list(table):
+      if column["serial"]:
+        primary = column["name"]
+        break
+    else:
+      return None
+
+    query = "SELECT COUNT([%s]) FROM [%s]" % (primary, table)
+    return self._execute(query).fetchone()[0] + 1
+
   def show_indexes(self, table):
     meta = (("Table", "TEXT"), ("Non_unique", "INTEGER"),
             ("Key_name", "TEXT"), ("Seq_in_index", "INTEGER"),
@@ -150,21 +177,18 @@ class Database:
             ("Comment", "TEXT"), ("Index_comment", "TEXT"))
     data = []
 
-    columns = self._column_list(table)
-
-    for column in columns:
+    for column in self._column_list(table):
       if not column["index"]:
         continue
 
       unique = int(not column["unique"])
       key = "PRIMARY" if column["primary"] else column["index"]
-      name = column["name"]
       collation = "A" if column["order"] == 1 else None
       cardinality = self._calc_cardinality(table, column["name"])
-      null = "YES" if column["null"] else None
+      null = "YES" if column["nullable"] else None
 
-      item = (table, unique, key, 1, name, collation, cardinality,
-              None, None, null, "BTREE", "", "")
+      item = (table, unique, key, 1, column["name"], collation,
+              cardinality, None, None, null, "BTREE", "", "")
       data.append(item)
 
     return meta, data
@@ -172,19 +196,42 @@ class Database:
   def show_charset(self):
     meta = (("Charset", "TEXT"), ("Description", "TEXT"),
             ("Default collation", "TEXT"), ("Maxlen", "INTEGER"))
-    data = [("utf8", "UTF-8 Unicode", "utf8_general_ci", 3)]
+    data = [("utf8", "UTF-8 Unicode", Charset.UTF8_GENERAL_CI.name.lower(), 3)]
     return meta, data
 
   def show_collation(self):
     meta = (("Collation", "TEXT"), ("Charset", "TEXT"),
             ("Id", "INTEGER"), ("Default", "TEXT"),
             ("Compiled", "TEXT"), ("Sortlen", "INTEGER"))
-    data = [("utf8_general_ci", "utf8", Charset.UTF8_GENERAL_CI, "Yes", "Yes", 1)]
+    data = [(Charset.UTF8_GENERAL_CI.name.lower(), "utf8",
+             Charset.UTF8_GENERAL_CI, "Yes", "Yes", 1)]
     return meta, data
 
   def show_engines(self):
     meta = (("Engine", "TEXT"), ("Support", "TEXT"), ("Comment", "TEXT"))
     data = [("SQLite", "DEFAULT", "Small. Fast. Reliable. Choose any three.")]
+    return meta, data
+
+  def show_table_status(self, name=None):
+    meta = (("Name", "TEXT"), ("Engine", "TEXT"), ("Version", "INTEGER"),
+            ("Row_format", "TEXT"), ("Rows", "INTEGER"),
+            ("Avg_row_length", "INTEGER"), ("Data_length", "INTEGER"),
+            ("Max_data_length", "INTEGER"), ("Index_length", "INTEGER"),
+            ("Data_free", "INTEGER"), ("Auto_increment", "INTEGER"),
+            ("Create_time", "TEXT"), ("Update_time", "TEXT"),
+            ("Check_time", "TEXT"), ("Collation", "TEXT"),
+            ("Checksum", "INTEGER"), ("Create_options", "TEXT"),
+            ("Comment", "TEXT"))
+    data = []
+    tables = [name] if name else self.get_tables()
+
+    for table in tables:
+      rows = self._count_rows(table)
+      collation = Charset.UTF8_GENERAL_CI.name.lower()
+      auto = self._next_id(table)
+      data.append((table, "SQLite", 9, "Dynamic", rows, 0, 0, None, 0, 0,
+                   auto, None, None, None, collation, None, "", ""))
+
     return meta, data
 
   def visible_type(self, name):
@@ -203,7 +250,7 @@ class Database:
 
   def internal_type(self, name):
     if name is None:
-      return FieldType.BLOB
+      return FieldType.BLOB, 2 ** 16 - 1, 0x1f
 
     name = name.upper()
     field = name
@@ -224,7 +271,7 @@ class Database:
     if "INT" in name:
       return FieldType.LONGLONG, 21, 0
     elif "DECIMAL" in name or "NUMERIC" in name:
-     return FieldType.DECIMAL, length + decimals, decimals
+     return FieldType.DECIMAL, length, decimals
     elif "FLOAT" in name or "DOUBLE" in name or "REAL" in name:
      return FieldType.DOUBLE, length, decimals
     elif "CHAR" in name and length > 0:
@@ -248,12 +295,12 @@ class Database:
 
     for column in columns:
       name = column["name"]
-      key = "PRI" if column["primary"] == 1 else ""
-      null = "YES" if column["null"] else "NO"
-      extra = "auto_increment" if key == "PRI" and null == "NO" and column["type"] == "INTEGER" else ""
-      default = "NULL" if column["default"] is None else column["default"]
-      field = self.visible_type(column["type"])
-      collation = "utf8_general_ci" if field != "text" else ""
+      key = "PRI" if column["primary"] else ""
+      null = "YES" if column["nullable"] else "NO"
+      extra = "auto_increment" if column["serial"] else ""
+      default = column["default"]
+      field = column["type"]
+      collation = Charset.UTF8_GENERAL_CI.name.lower() if field != "text" else ""
 
       if key == "" and column["index"]:
         key = "UNI" if column["unique"] else "MUL"
