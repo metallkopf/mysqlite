@@ -32,13 +32,13 @@ class Database:
     return tables
 
   def show_databases(self):
-    meta = (("Database", "VARCHAR(63)"), )
+    meta = (("Database", "VARCHAR(64)"), )
     data = []
 
     for name in self.get_databases():
       data.append((name, ))
 
-    return meta, data
+    return self._complete_meta(meta), data
 
   def show_tables(self):
     meta = (("Table", "VARCHAR(64)"), )
@@ -47,7 +47,7 @@ class Database:
     for name in self.get_tables():
       data.append((name, ))
 
-    return meta, data
+    return self._complete_meta(meta), data
 
   def show_create_table(self, name):
     meta = (("Table", "VARCHAR(64)"), ("Create Table", "TEXT"))
@@ -95,10 +95,11 @@ class Database:
 
     definition = "CREATE TABLE %s (\n%s\n) ENGINE=SQLite" % (name, ",\n".join(lines))
 
-    return meta, [[name, definition]]
+    return self._complete_meta(meta), [[name, definition]]
 
   def show_variables(self):
-    return (("Variable_name", "VARCHAR(30)"), ("Value", "VARCHAR(255)")), []
+    meta = (("Variable_name", "VARCHAR(30)"), ("Value", "VARCHAR(255)"))
+    return self._complete_meta(meta), []
 
   def _index_list(self, table):
     query = "PRAGMA index_list([%s])" % table
@@ -195,13 +196,13 @@ class Database:
               cardinality, None, None, null, "BTREE", "", "")
       data.append(item)
 
-    return meta, data
+    return self._complete_meta(meta), data
 
   def show_charset(self):
     meta = (("Charset", "VARCHAR(30)"), ("Description", "VARCHAR(60)"),
             ("Default collation", "VARCHAR(60)"), ("Maxlen", "INTEGER"))
     data = [("utf8", "UTF-8 Unicode", Charset.UTF8_GENERAL_CI.name.lower(), 3)]
-    return meta, data
+    return self._complete_meta(meta), data
 
   def show_collation(self):
     meta = (("Collation", "VARCHAR(30)"), ("Charset", "VARCHAR(30)"),
@@ -209,13 +210,13 @@ class Database:
             ("Compiled", "VARCHAR(30)"), ("Sortlen", "INTEGER"))
     data = [(Charset.UTF8_GENERAL_CI.name.lower(), "utf8",
              Charset.UTF8_GENERAL_CI, "Yes", "Yes", 1)]
-    return meta, data
+    return self._complete_meta(meta), data
 
   def show_engines(self):
     meta = (("Engine", "VARCHAR(10)"), ("Support", "VARCHAR(10)"),
             ("Comment", "VARCHAR(80)"))
     data = [("SQLite", "DEFAULT", "Small. Fast. Reliable. Choose any three.")]
-    return meta, data
+    return self._complete_meta(meta), data
 
   def show_table_status(self, name=None):
     meta = (("Name", "VARCHAR(64)"), ("Engine", "VARCHAR(10)"),
@@ -237,7 +238,7 @@ class Database:
       data.append((table, "SQLite", 9, "Dynamic", rows, 0, 0, None, 0, 0,
                    auto, None, None, None, collation, None, "", ""))
 
-    return meta, data
+    return self._complete_meta(meta), data
 
   def visible_type(self, name):
     field, length, decimals = self.internal_type(name)
@@ -320,16 +321,22 @@ class Database:
       else:
         data.append([name, field, collation, null, key, default, extra, "", ""])
 
-    return meta, data
+    return self._complete_meta(meta), data
 
   def _exectrace(self, cursor, sql, bindings):
     self._meta = cursor.getdescription()
     return True
 
-  def execute(self, query, params=None):
-    result = self._execute(query, params)
+  def _complete_meta(self, meta):
+    new_meta = []
 
-    try:
-      return result.getdescription(), result.fetchall() # FIXME un-optimized
-    except ExecutionCompleteError:
-      return self._meta, [] # NOTE don't fail on empty resultset
+    for name, field in meta:
+      value, length, decimals = self.internal_type(field)
+      new_meta.append((name, field, value, length, decimals))
+
+    return new_meta
+
+  def execute(self, query, params=None):
+    results = self._execute(query, params)
+
+    return self._complete_meta(self._meta), results.fetchall()

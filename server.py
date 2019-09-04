@@ -155,9 +155,7 @@ class Server(StreamRequestHandler):
     meta, rows = data
     self.queue_packet(pack_byte(len(meta)))
 
-    for name, field in meta:
-      field, length, decimals = self.db.internal_type(field)
-
+    for (name, _, field, length, decimals) in meta:
       self.send_columndef(name, field, length, decimals)
 
     self.send_eof()
