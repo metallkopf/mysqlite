@@ -11,7 +11,7 @@ class Database:
 
   def __init__(self, path):
     self.inst = Connection(path, SQLITE_ACCESS_READ)
-    self.version = sqlitelibversion() + "-SQLite"
+    self.version = "4.1.25-SQLite-" + sqlitelibversion()
 
   def _execute(self, query, params=None):
     cursor = self.inst.cursor()
@@ -32,7 +32,7 @@ class Database:
     return tables
 
   def show_databases(self):
-    meta = (("SCHEMA_NAME", "TEXT"), )
+    meta = (("Database", "VARCHAR(63)"), )
     data = []
 
     for name in self.get_databases():
@@ -41,7 +41,7 @@ class Database:
     return meta, data
 
   def show_tables(self):
-    meta = (("TABLE_NAME", "TEXT"), )
+    meta = (("Table", "VARCHAR(64)"), )
     data = []
 
     for name in self.get_tables():
@@ -50,20 +50,23 @@ class Database:
     return meta, data
 
   def show_create_table(self, name):
-    meta = (("Table", "TEXT"), ("Create Table", "TEXT"))
+    meta = (("Table", "VARCHAR(64)"), ("Create Table", "TEXT"))
     lines = []
     primaries = []
     extra = []
 
     for column in self._column_list(name):
-      line = " %s" % column["name"]
+      line = "  %s" % column["name"]
       line += " %s" % column["type"]
 
       if not column["nullable"]:
         line += " NOT NULL"
 
-      if column["default"] is not None:
-        line += " DEFAULT '%s'" % column["default"]
+      if column["nullable"] or column["default"] is not None:
+        if column["default"] is None:
+          line += " DEFAULT NULL"
+        else:
+          line += " DEFAULT '%s'" % column["default"]
 
       if column["serial"]:
         line += " AUTO_INCREMENT"
@@ -74,19 +77,18 @@ class Database:
         primaries.append(column["name"])
 
       if column["index"]:
-        line = "%s KEY %s (%s%s)" % (" UNIQUE" if column["unique"] else "",
-                                     column["index"], column["name"],
-                                     " ASC" if column["order"] == 1 else "")
+        line = " %s KEY %s (%s%s)" % (" UNIQUE" if column["unique"] else "",
+                                      column["index"], column["name"],
+                                      " ASC" if column["order"] == 1 else "")
         extra.append(line)
 
       if column["foreign"]:
-        line = " FOREIGN KEY (%s) REFERENCES %s(%s)" % (column["name"],
-                                                        column["table"],
-                                                        column["foreign"])
+        line = "  CONSTRAINT fk_{0}_{1} FOREIGN KEY ({1}) REFERENCES {2} ({3})". \
+          format(name, column["name"], column["table"], column["foreign"])
         extra.append(line)
 
     if primaries:
-      lines.append(" PRIMARY KEY (%s)" % ", ".join(primaries))
+      lines.append("  PRIMARY KEY (%s)" % ", ".join(primaries))
 
     extra.sort(reverse=True)
     lines.extend(extra)
@@ -96,7 +98,7 @@ class Database:
     return meta, [[name, definition]]
 
   def show_variables(self):
-    return (("Variable_name", "TEXT"), ("Value", "TEXT")), []
+    return (("Variable_name", "VARCHAR(30)"), ("Value", "VARCHAR(255)")), []
 
   def _index_list(self, table):
     query = "PRAGMA index_list([%s])" % table
@@ -170,12 +172,13 @@ class Database:
     return self._execute(query).fetchone()[0] + 1
 
   def show_indexes(self, table):
-    meta = (("Table", "TEXT"), ("Non_unique", "INTEGER"),
-            ("Key_name", "TEXT"), ("Seq_in_index", "INTEGER"),
-            ("Column_name", "TEXT"), ("Collation", "TEXT"),
+    meta = (("Table", "VARCHAR(64)"), ("Non_unique", "INTEGER"),
+            ("Key_name", "VARCHAR(64)"), ("Seq_in_index", "INTEGER"),
+            ("Column_name", "VARCHAR(64)"), ("Collation", "VARCHAR(1)"),
             ("Cardinality", "INTEGER"), ("Sub_part", "INTEGER"),
-            ("Packed", "TEXT"), ("Null", "TEXT"), ("Index_type", "TEXT"),
-            ("Comment", "TEXT"), ("Index_comment", "TEXT"))
+            ("Packed", "VARCHAR(10)"), ("Null", "VARCHAR(3)"),
+            ("Index_type", "VARCHAR(16)"), ("Comment", "VARCHAR(255)"),
+            ("Index_comment", "VARCHAR(255)"))
     data = []
 
     for column in self._column_list(table):
@@ -195,34 +198,35 @@ class Database:
     return meta, data
 
   def show_charset(self):
-    meta = (("Charset", "TEXT"), ("Description", "TEXT"),
-            ("Default collation", "TEXT"), ("Maxlen", "INTEGER"))
+    meta = (("Charset", "VARCHAR(30)"), ("Description", "VARCHAR(60)"),
+            ("Default collation", "VARCHAR(60)"), ("Maxlen", "INTEGER"))
     data = [("utf8", "UTF-8 Unicode", Charset.UTF8_GENERAL_CI.name.lower(), 3)]
     return meta, data
 
   def show_collation(self):
-    meta = (("Collation", "TEXT"), ("Charset", "TEXT"),
-            ("Id", "INTEGER"), ("Default", "TEXT"),
-            ("Compiled", "TEXT"), ("Sortlen", "INTEGER"))
+    meta = (("Collation", "VARCHAR(30)"), ("Charset", "VARCHAR(30)"),
+            ("Id", "INTEGER"), ("Default", "VARCHAR(30)"),
+            ("Compiled", "VARCHAR(30)"), ("Sortlen", "INTEGER"))
     data = [(Charset.UTF8_GENERAL_CI.name.lower(), "utf8",
              Charset.UTF8_GENERAL_CI, "Yes", "Yes", 1)]
     return meta, data
 
   def show_engines(self):
-    meta = (("Engine", "TEXT"), ("Support", "TEXT"), ("Comment", "TEXT"))
+    meta = (("Engine", "VARCHAR(10)"), ("Support", "VARCHAR(10)"),
+            ("Comment", "VARCHAR(80)"))
     data = [("SQLite", "DEFAULT", "Small. Fast. Reliable. Choose any three.")]
     return meta, data
 
   def show_table_status(self, name=None):
-    meta = (("Name", "TEXT"), ("Engine", "TEXT"), ("Version", "INTEGER"),
-            ("Row_format", "TEXT"), ("Rows", "INTEGER"),
-            ("Avg_row_length", "INTEGER"), ("Data_length", "INTEGER"),
-            ("Max_data_length", "INTEGER"), ("Index_length", "INTEGER"),
-            ("Data_free", "INTEGER"), ("Auto_increment", "INTEGER"),
-            ("Create_time", "TEXT"), ("Update_time", "TEXT"),
-            ("Check_time", "TEXT"), ("Collation", "TEXT"),
-            ("Checksum", "INTEGER"), ("Create_options", "TEXT"),
-            ("Comment", "TEXT"))
+    meta = (("Name", "VARCHAR(64)"), ("Engine", "VARCHAR(10)"),
+            ("Version", "INTEGER"), ("Row_format", "VARCHAR(10)"),
+            ("Rows", "INTEGER"), ("Avg_row_length", "INTEGER"),
+            ("Data_length", "INTEGER"), ("Max_data_length", "INTEGER"),
+            ("Index_length", "INTEGER"), ("Data_free", "INTEGER"),
+            ("Auto_increment", "INTEGER"), ("Create_time", "VARCHAR(19)"),
+            ("Update_time", "VARCHAR(19)"), ("Check_time", "VARCHAR(19)"),
+            ("Collation", "VARCHAR(32)"), ("Checksum", "INTEGER"),
+            ("Create_options", "VARCHAR(255)"), ("Comment", "VARCHAR(80)"))
     data = []
     tables = [name] if name else self.get_tables()
 
@@ -285,12 +289,15 @@ class Database:
     data = []
 
     if not full:
-      meta = (("Field", "TEXT"), ("Type", "TEXT"), ("Null", "TEXT"),
-              ("Key", "TEXT"), ("Default", "TEXT"), ("Extra", "TEXT"))
+      meta = (("Field", "VARCHAR(64)"), ("Type", "VARCHAR(40)"),
+              ("Null", "VARCHAR(1)"), ("Key", "VARCHAR(3)"),
+              ("Default", "VARCHAR(64)"), ("Extra", "VARCHAR(255)"))
     else:
-      meta = (("Field", "TEXT"), ("Type", "TEXT"), ("Collation", "TEXT"),
-              ("Null", "TEXT"), ("Key", "TEXT"), ("Default", "TEXT"),
-              ("Extra", "TEXT"), ("Privileges", "TEXT"), ("Comment", "TEXT"))
+      meta = (("Field", "VARCHAR(64)"), ("Type", "VARCHAR(40)"),
+              ("Collation", "VARCHAR(40)"), ("Null", "VARCHAR(1)"),
+              ("Key", "VARCHAR(3)"), ("Default", "VARCHAR(64)"),
+              ("Extra", "VARCHAR(20)"), ("Privileges", "VARCHAR(80)"),
+              ("Comment", "VARCHAR(255)"))
 
     columns = self._column_list(name)
 
@@ -301,7 +308,9 @@ class Database:
       extra = "auto_increment" if column["serial"] else ""
       default = column["default"]
       field = column["type"]
-      collation = Charset.UTF8_GENERAL_CI.name.lower() if field != "text" else ""
+      collation = ""
+      if field == "text" or "char" in field:
+        collation = Charset.UTF8_GENERAL_CI.name.lower()
 
       if key == "" and column["index"]:
         key = "UNI" if column["unique"] else "MUL"

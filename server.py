@@ -203,7 +203,7 @@ class Server(StreamRequestHandler):
       self.send_error(message, 1044)
 
   def _extract_last(self, query):
-    return query.split(" ")[-1].split(".")[-1].strip("`").strip("[]")
+    return query.split(" ")[-1].split(".")[-1].strip("`'")
 
   def handle(self):
     self.db = Database(self.server.path)
