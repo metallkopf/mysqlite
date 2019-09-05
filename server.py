@@ -5,11 +5,11 @@ from threading import current_thread
 from binascii import hexlify
 from io import BytesIO
 from database import Database
-from sqlparse import parse
 from definitions import *
 from logging import debug, info, warning, error
 from traceback import print_exc
 from parser import guess_statement
+from time import monotonic
 from utils import *
 
 
@@ -20,12 +20,16 @@ CHARSET = Charset.UTF8_GENERAL_CI
 STATUS = Status.AUTOCOMMIT
 
 
+connections = {}
+
+
 class Server(StreamRequestHandler):
   thread = 0
   db = None
   number = -1
   connected = False
   packet = None
+  port = 0
 
   capabilities = 0
   max_packet = 0
@@ -173,8 +177,20 @@ class Server(StreamRequestHandler):
             ("Host", "VARCHAR(64)"), ("db", "VARCHAR(64)"),
             ("Command", "VARCHAR(16)"), ("Time", "INTEGER"),
             ("State", "VARCHAR(30)"), ("Info", "TEXT"))
-    data = [(self.thread, self.username, "%s:%d" % self.client_address,
-             self.schema, Command.SLEEP.name.capitalize(), 0, "", None)]
+    data = []
+
+    for connection in connections.values():
+      if full is None and self.username != connection["username"]:
+        continue
+
+      command = None
+      if connection["command"] in Command.__members__.values():
+        command = Command(connection["command"]).name.capitalize()
+
+      item = (connection["thread"], connection["username"],
+              connection["host"], connection["schema"], command,
+              int(monotonic() - connection["time"]), "", None)
+      data.append(item)
 
     self.send_resultset((self.db.expand_meta(meta), data))
 
@@ -202,6 +218,7 @@ class Server(StreamRequestHandler):
     if name in self.db.get_databases():
       self.send_ok()
       self.schema = name
+      connections[self.port]["schema"] = self.schema
     else:
       message = "Access denied for user '%s'@'%s' to database '%s'" % \
         (self.username, self.client_address[0], name)
@@ -256,6 +273,11 @@ class Server(StreamRequestHandler):
     self.thread = int(current_thread().name.split("-")[-1])
     self.packet = BytesIO()
     self.send_handshake()
+    self.port = self.client_address[1]
+    connections[self.port] = {"thread": self.thread, "username": None,
+                              "host": "%s:%d" % self.client_address,
+                              "schema": None, "time": monotonic(),
+                              "command": Command.CONNECT.value}
 
     while True:
       header = read_data(self.rfile, "<I")[0]
@@ -270,9 +292,14 @@ class Server(StreamRequestHandler):
 
       if not self.connected:
         self.handle_handshake(payload)
+        connections[self.port]["username"] = self.username
+        connections[self.port]["time"] = monotonic()
+        connections[self.port]["command"] = Command.SLEEP.value
         continue
 
       command = read_data(payload, "<B")[0]
+      connections[self.port]["command"] = command
+      connections[self.port]["time"] = monotonic()
 
       if command == Command.QUERY:
         query = read_string(payload).strip().strip(";")
@@ -286,14 +313,13 @@ class Server(StreamRequestHandler):
           except Exception as e:
             print_exc()
             self.send_error(str(e))
-        elif self.process_query(query):
-          continue
-        elif keyword == "SET":
-          self.send_ok()
-        else:
-          message = "Access denied for user '%s'@'%s' to database '%s'" % \
-            (self.username, self.client_address[0], self.schema)
-          self.send_error(message, 1044)
+        elif not self.process_query(query):
+          if keyword == "SET":
+            self.send_ok()
+          else:
+            message = "Access denied for user '%s'@'%s' to database '%s'" % \
+              (self.username, self.client_address[0], self.schema)
+            self.send_error(message, 1044)
       elif command == Command.INIT_DB:
         name = read_string(payload)
         self.use_database(name)
@@ -306,3 +332,10 @@ class Server(StreamRequestHandler):
           self.send_unsupported(Command(command).name)
         else:
           self.send_unsupported("UNKNOWN")
+
+      connections[self.port]["time"] = monotonic()
+      connections[self.port]["command"] = Command.SLEEP.value
+
+  def finish(self):
+    super().finish()
+    del connections[self.port]

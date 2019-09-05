@@ -4,14 +4,13 @@ from apsw import Connection, SQLITE_ACCESS_READ, sqlitelibversion, ExecutionComp
 from re import match
 from definitions import *
 
-
 class Database:
   inst = None
   version = ""
 
   def __init__(self, path):
     self.inst = Connection(path, SQLITE_ACCESS_READ)
-    self.version = "4.1.25-SQLite-" + sqlitelibversion()
+    self.version = "4.1.25-SQLite"
 
   def _execute(self, query, params=None):
     cursor = self.inst.cursor()
