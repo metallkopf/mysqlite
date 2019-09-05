@@ -9,6 +9,7 @@ from sqlparse import parse
 from definitions import *
 from logging import debug, info, warning, error
 from traceback import print_exc
+from parser import guess_statement
 from utils import *
 
 
@@ -20,6 +21,7 @@ STATUS = Status.AUTOCOMMIT
 
 
 class Server(StreamRequestHandler):
+  thread = 0
   db = None
   number = -1
   connected = False
@@ -42,7 +44,6 @@ class Server(StreamRequestHandler):
       self.number = 0
 
     length = len(payload)
-    info("QUEUEING [%d] (%d)...", self.number, length)
     header = length | self.number << 24
     self.packet.write(pack_long(header))
     self.packet.write(payload)
@@ -52,19 +53,15 @@ class Server(StreamRequestHandler):
       self.send_packets()
 
   def send_packets(self):
-    info("SENDING (%d)...", self.packet.tell())
     self.wfile.write(self.packet.getvalue())
     self.packet.seek(0)
     self.packet.truncate(0)
 
   def send_handshake(self):
-    info("HELLO...")
-    thread = int(current_thread().name.split("-")[-1])
-
     payload = BytesIO()
     payload.write(pack_byte(10)) # protocol version
     payload.write(pack_nullstring(self.db.version)) # server version
-    payload.write(pack_long(thread)) # connection id
+    payload.write(pack_long(self.thread)) # connection id
     payload.write(pack_fixedstring(" " * 8)) # auth-plugin-data-part-1
     payload.write(pack_padding()) # filler
     payload.write(pack_integer(CAPABILITIES)) # capability flags
@@ -171,6 +168,16 @@ class Server(StreamRequestHandler):
     self.send_eof()
     self.send_packets()
 
+  def send_processlist(self, full):
+    meta = (("Id", "INTEGER"), ("User", "VARCHAR(16)"),
+            ("Host", "VARCHAR(64)"), ("db", "VARCHAR(64)"),
+            ("Command", "VARCHAR(16)"), ("Time", "INTEGER"),
+            ("State", "VARCHAR(30)"), ("Info", "TEXT"))
+    data = [(self.thread, self.username, "%s:%d" % self.client_address,
+             self.schema, Command.SLEEP.name.capitalize(), 0, "", None)]
+
+    self.send_resultset((self.db.expand_meta(meta), data))
+
   def handle_handshake(self, payload):
     self.capabilities, self.max_packet, self.charset = \
       read_data(payload, "<IIb23x")
@@ -200,11 +207,53 @@ class Server(StreamRequestHandler):
         (self.username, self.client_address[0], name)
       self.send_error(message, 1044)
 
-  def _extract_last(self, query):
-    return query.split(" ")[-1].split(".")[-1].strip("`'")
+  def _extract_table(self, text):
+    return text.replace("`", "").split(".")[-1]
+
+  def process_query(self, text):
+    function, params = guess_statement(text)
+
+    if function is None:
+      return False
+
+    if function == "show_databases":
+      self.send_resultset(self.db.show_databases())
+    elif function == "show_tables":
+      self.send_resultset(self.db.show_tables())
+    elif function == "show_columns":
+      table = self._extract_table(params["table"])
+      self.send_resultset(self.db.show_columns(table, params["modifier"]))
+    elif function == "show_create_table":
+      name = self._extract_table(params["name"])
+      self.send_resultset(self.db.show_create_table(name))
+    elif function == "show_index":
+      table = self._extract_table(params["table"])
+      self.send_resultset(self.db.show_indexes(table))
+    elif function == "show_variables" or function == "show_status":
+      self.send_resultset(self.db.show_variables())
+    elif function == "show_engines":
+      self.send_resultset(self.db.show_engines())
+    elif function == "show_collation":
+      self.send_resultset(self.db.show_collation())
+    elif function == "show_character_set":
+      self.send_resultset(self.db.show_charset())
+    elif function == "show_table_status":
+      self.send_resultset(self.db.show_table_status(params["pattern"]))
+    elif function == "use":
+      self.use_database(params["database"])
+    elif function == "show_processlist":
+      self.send_processlist(params["modifier"])
+    elif function == "help":
+      message = "Help database is corrupt or does not exist"
+      self.send_error(message, 1244, "HY000")
+    else:
+      return False
+
+    return True
 
   def handle(self):
     self.db = Database(self.server.path)
+    self.thread = int(current_thread().name.split("-")[-1])
     self.packet = BytesIO()
     self.send_handshake()
 
@@ -213,7 +262,6 @@ class Server(StreamRequestHandler):
       self.number = header >> 24
       size = self.number << 24 ^ header
 
-      info("RECEIVING [%d] (%d)...", self.number, size)
       payload = BytesIO()
       payload.write(self.rfile.read(size))
       payload.seek(0)
@@ -222,78 +270,39 @@ class Server(StreamRequestHandler):
 
       if not self.connected:
         self.handle_handshake(payload)
-      else:
-        command = read_data(payload, "<B")[0]
+        continue
 
-        if command == Command.QUERY:
-          query = read_string(payload).strip().strip(";")
-          info("QUERY: %s", query)
-          keywords = query.upper().split(" ", 4)
+      command = read_data(payload, "<B")[0]
 
-          if keywords[:2] == ["SHOW", "DATABASES"]:
-            self.send_resultset(self.db.show_databases())
-          elif keywords[:2] == ["SHOW", "TABLES"]:
-            self.send_resultset(self.db.show_tables())
-          elif keywords[:2] == ["SHOW", "COLUMNS"]:
-            table = self._extract_last(query)
-            self.send_resultset(self.db.show_columns(table))
-          elif keywords[:3] == ["SHOW", "FULL", "COLUMNS"]:
-            table = self._extract_last(query)
-            self.send_resultset(self.db.show_columns(table, True))
-          elif keywords[:3] == ["SHOW", "CREATE", "TABLE"]:
-            name = self._extract_last(query)
-            self.send_resultset(self.db.show_create_table(name))
-          elif keywords[:2] == ["SHOW", "INDEX"]:
-            table = self._extract_last(query)
-            self.send_resultset(self.db.show_indexes(table))
-          elif keywords[:2] == ["SHOW", "VARIABLES"] or \
-              keywords[:2] == ["SHOW", "STATUS"]:
-            self.send_resultset(self.db.show_variables())
-          elif keywords[:2] == ["SHOW", "ENGINES"]:
-            self.send_resultset(self.db.show_engines())
-          elif keywords[:2] == ["SHOW", "COLLATION"]:
-            self.send_resultset(self.db.show_collation())
-          elif keywords[:3] == ["SHOW", "CHARACTER", "SET"]:
-            self.send_resultset(self.db.show_charset())
-          elif keywords[:4] == ["SHOW", "TABLE", "STATUS", "LIKE"]:
-            name = self._extract_last(query)
-            self.send_resultset(self.db.show_table_status(name))
-          elif keywords[:3] == ["SHOW", "TABLE", "STATUS"]:
-            self.send_resultset(self.db.show_table_status())
-          elif keywords[0] == "SHOW" or keywords[0] == "SET":
-            self.send_ok()
-          elif keywords[0] == "USE":
-            name = self._extract_last(query)
-            info("USE DATABASE %s", name)
-            self.use_database(name)
-          elif keywords[0] in ["CREATE", "ALTER", "DROP", "RENAME",
-                               "TRUNCATE", "LOAD", "INSERT", "UPDATE",
-                               "REPLACE", "DELETE", "GRANT", "REVOKE",
-                               "ANALYZE", "OPTIMIZE", "REPAIR"]:
-            message = "Access denied for user '%s'@'%s' to database '%s'" % \
-              (self.username, self.client_address[0], self.schema)
-            self.send_error(message, 1044)
-          elif keywords[0] == "HELP":
-            message = "Help database is corrupt or does not exist"
-            self.send_error(message, 1244, "HY000")
-          else:
-            try:
-              self.send_resultset(self.db.execute(query))
-            except Exception as e:
-              print_exc()
-              self.send_error(str(e))
-        elif command == Command.INIT_DB:
-          name = read_string(payload)
-          info("USE DATABASE %s", name)
-          self.use_database(name)
-        elif command == Command.QUIT:
-          info("BYE...")
-          break
-        elif command == Command.PING:
-          info("PING...")
+      if command == Command.QUERY:
+        query = read_string(payload).strip().strip(";")
+        info("QUERY: %s", query)
+
+        keyword = query.upper().split(" ", 1)[0]
+
+        if keyword == "SELECT":
+          try:
+            self.send_resultset(self.db.execute(query))
+          except Exception as e:
+            print_exc()
+            self.send_error(str(e))
+        elif self.process_query(query):
+          continue
+        elif keyword == "SET":
           self.send_ok()
         else:
-          if command in Command.__members__.values():
-            self.send_unsupported(Command(command).name)
-          else:
-            self.send_unsupported("UNKNOWN")
+          message = "Access denied for user '%s'@'%s' to database '%s'" % \
+            (self.username, self.client_address[0], self.schema)
+          self.send_error(message, 1044)
+      elif command == Command.INIT_DB:
+        name = read_string(payload)
+        self.use_database(name)
+      elif command == Command.QUIT:
+        break
+      elif command == Command.PING:
+        self.send_ok()
+      else:
+        if command in Command.__members__.values():
+          self.send_unsupported(Command(command).name)
+        else:
+          self.send_unsupported("UNKNOWN")

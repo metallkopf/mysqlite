@@ -46,7 +46,7 @@ def pack_varinteger(value):
   elif value >= 251 and value < 2 ** 16:
     return pack_byte(0xfc) + pack_integer(value)
   elif value >= 2 ** 16 and value < 2 ** 24:
-    return pack_byte(0xfd) + pack_long(value) >> 8
+    return pack_byte(0xfd) + pack_long(value)[:-1]
   else: #value >= 2 ** 24 and value < 2 ** 64
     return pack_byte(0xfe) + pack_doublelong(value)
 

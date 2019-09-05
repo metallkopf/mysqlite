@@ -38,7 +38,7 @@ class Database:
     for name in self.get_databases():
       data.append((name, ))
 
-    return self._complete_meta(meta), data
+    return self.expand_meta(meta), data
 
   def show_tables(self):
     meta = (("Table", "VARCHAR(64)"), )
@@ -47,7 +47,7 @@ class Database:
     for name in self.get_tables():
       data.append((name, ))
 
-    return self._complete_meta(meta), data
+    return self.expand_meta(meta), data
 
   def show_create_table(self, name):
     meta = (("Table", "VARCHAR(64)"), ("Create Table", "TEXT"))
@@ -95,11 +95,11 @@ class Database:
 
     definition = "CREATE TABLE %s (\n%s\n) ENGINE=SQLite" % (name, ",\n".join(lines))
 
-    return self._complete_meta(meta), [[name, definition]]
+    return self.expand_meta(meta), [[name, definition]]
 
   def show_variables(self):
     meta = (("Variable_name", "VARCHAR(30)"), ("Value", "VARCHAR(255)"))
-    return self._complete_meta(meta), []
+    return self.expand_meta(meta), []
 
   def _index_list(self, table):
     query = "PRAGMA index_list([%s])" % table
@@ -196,13 +196,13 @@ class Database:
               cardinality, None, None, null, "BTREE", "", "")
       data.append(item)
 
-    return self._complete_meta(meta), data
+    return self.expand_meta(meta), data
 
   def show_charset(self):
     meta = (("Charset", "VARCHAR(30)"), ("Description", "VARCHAR(60)"),
             ("Default collation", "VARCHAR(60)"), ("Maxlen", "INTEGER"))
     data = [("utf8", "UTF-8 Unicode", Charset.UTF8_GENERAL_CI.name.lower(), 3)]
-    return self._complete_meta(meta), data
+    return self.expand_meta(meta), data
 
   def show_collation(self):
     meta = (("Collation", "VARCHAR(30)"), ("Charset", "VARCHAR(30)"),
@@ -210,13 +210,13 @@ class Database:
             ("Compiled", "VARCHAR(30)"), ("Sortlen", "INTEGER"))
     data = [(Charset.UTF8_GENERAL_CI.name.lower(), "utf8",
              Charset.UTF8_GENERAL_CI, "Yes", "Yes", 1)]
-    return self._complete_meta(meta), data
+    return self.expand_meta(meta), data
 
   def show_engines(self):
     meta = (("Engine", "VARCHAR(10)"), ("Support", "VARCHAR(10)"),
             ("Comment", "VARCHAR(80)"))
     data = [("SQLite", "DEFAULT", "Small. Fast. Reliable. Choose any three.")]
-    return self._complete_meta(meta), data
+    return self.expand_meta(meta), data
 
   def show_table_status(self, name=None):
     meta = (("Name", "VARCHAR(64)"), ("Engine", "VARCHAR(10)"),
@@ -238,7 +238,7 @@ class Database:
       data.append((table, "SQLite", 9, "Dynamic", rows, 0, 0, None, 0, 0,
                    auto, None, None, None, collation, None, "", ""))
 
-    return self._complete_meta(meta), data
+    return self.expand_meta(meta), data
 
   def visible_type(self, name):
     field, length, decimals = self.internal_type(name)
@@ -251,6 +251,10 @@ class Database:
       return "double(%d,%d)" % (length, decimals)
     elif field == FieldType.VAR_STRING:
       return "varchar(%d)" % length
+    elif field == FieldType.DATETIME:
+      return "datetime(%d)" % length
+    elif field == FieldType.BLOB:
+      return "blob"
     else:
       return "text"
 
@@ -279,9 +283,17 @@ class Database:
     elif "DECIMAL" in name or "NUMERIC" in name:
      return FieldType.DECIMAL, length, decimals
     elif "FLOAT" in name or "DOUBLE" in name or "REAL" in name:
-     return FieldType.DOUBLE, length, decimals
+      if length == 0:
+        length = 53
+      if decimals + length > 53:
+        length =- decimals
+      return FieldType.DOUBLE, length, decimals
     elif "CHAR" in name and length > 0:
       return FieldType.VAR_STRING, length, 0x1f
+    elif "DATE" in name:
+      return FieldType.DATETIME, 19, 0
+    elif "TEXT" in name:
+      return FieldType.VAR_STRING, 2 ** 16 -1, 0x1f
     else:
       return FieldType.BLOB, 2 ** 16 - 1, 0x1f
 
@@ -321,13 +333,13 @@ class Database:
       else:
         data.append([name, field, collation, null, key, default, extra, "", ""])
 
-    return self._complete_meta(meta), data
+    return self.expand_meta(meta), data
 
   def _exectrace(self, cursor, sql, bindings):
     self._meta = cursor.getdescription()
     return True
 
-  def _complete_meta(self, meta):
+  def expand_meta(self, meta):
     new_meta = []
 
     for name, field in meta:
@@ -339,4 +351,4 @@ class Database:
   def execute(self, query, params=None):
     results = self._execute(query, params)
 
-    return self._complete_meta(self._meta), results.fetchall()
+    return self.expand_meta(self._meta), results.fetchall()
