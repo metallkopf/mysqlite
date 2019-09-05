@@ -7,6 +7,7 @@ class Capability(IntFlag):
   LONG_FLAG = 0x4 # Get all column flags
   CONNECT_WITH_DB = 0x8 # One can specify db on connect
   NO_SCHEMA = 0x10 # Don't allow database.table.column
+  COMPRESS = 0x20 # Can use compression protocol
   PROTOCOL_41 = 0x200 # New 4.1 protocol
   INTERACTIVE = 0x400 # This is an interactive client
   TRANSACTIONS = 0x2000 # Client knows about transactions

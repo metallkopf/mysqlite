@@ -48,10 +48,11 @@ class Server(StreamRequestHandler):
       self.number = 0
 
     length = len(payload)
-    header = length | self.number << 24
-    self.packet.write(pack_long(header))
+    header = pack_header(length, self.number)
+    debug("> %s", payload)
+
+    self.packet.write(header)
     self.packet.write(payload)
-    debug(payload)
 
     if send:
       self.send_packets()
@@ -280,15 +281,13 @@ class Server(StreamRequestHandler):
                               "command": Command.CONNECT.value}
 
     while True:
-      header = read_data(self.rfile, "<I")[0]
-      self.number = header >> 24
-      size = self.number << 24 ^ header
+      length, self.number = read_header(self.rfile)
 
       payload = BytesIO()
-      payload.write(self.rfile.read(size))
+      payload.write(self.rfile.read(length))
       payload.seek(0)
 
-      debug(payload.getvalue())
+      debug("< %s", payload.getvalue())
 
       if not self.connected:
         self.handle_handshake(payload)

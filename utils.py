@@ -50,6 +50,9 @@ def pack_varinteger(value):
   else: #value >= 2 ** 24 and value < 2 ** 64
     return pack_byte(0xfe) + pack_doublelong(value)
 
+def pack_header(length, number):
+  return pack_long(length)[:-1] + pack_byte(number)
+
 def read_data(payload, fmt):
   data = payload.read(calcsize(fmt))
   return unpack(fmt, data)
@@ -70,3 +73,6 @@ def read_string(payload):
 def read_varstring(payload):
   length = read_data(payload, "<B")[0]
   return read_data(payload, "%ds" % length)[0]
+
+def read_header(payload):
+  return unpack("<I", payload.read(3) + b"\0")[0], unpack("<B", payload.read(1))[0]
