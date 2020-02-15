@@ -1,8 +1,9 @@
-#!/usr/bin/env python
-
-from apsw import Connection, SQLITE_ACCESS_READ, sqlitelibversion, ExecutionCompleteError
 from re import match
-from definitions import *
+
+from apsw import SQLITE_ACCESS_READ, Connection
+
+from definitions import Charset, FieldType
+
 
 class Database:
   inst = None
@@ -14,7 +15,7 @@ class Database:
 
   def _execute(self, query, params=None):
     cursor = self.inst.cursor()
-    cursor.setexectrace(self._exectrace) # save getdescription columns
+    cursor.setexectrace(self._exectrace)  # save getdescription columns
 
     return cursor.execute(query, params)
 
@@ -137,8 +138,7 @@ class Database:
                 "table": None, "foreign": None, "update": None,
                 "delete": None, "serial": False}
 
-      if "int" in column["type"] and column["primary"] and \
-          not column["nullable"]:
+      if "int" in column["type"] and column["primary"] and not column["nullable"]:
         column["serial"] = True
 
       if row[1] in indexes:
@@ -266,11 +266,11 @@ class Database:
     length = 0
     decimals = 0
 
-    results = match("(\w+)\((\d+),(\d+)\)", name)
+    results = match(r"(\w+)\((\d+),(\d+)\)", name)
     if results:
       field, length, decimals = results.groups()
     else:
-      results = match("(\w+)\((\d+)\)", name)
+      results = match(r"(\w+)\((\d+)\)", name)
       if results:
         field, length = results.groups()
 
@@ -285,14 +285,14 @@ class Database:
       if length == 0:
         length = 53
       if decimals + length > 53:
-        length =- decimals
+        length -= decimals
       return FieldType.DOUBLE, length, decimals
     elif "CHAR" in name and length > 0:
       return FieldType.VAR_STRING, length, 0x1f
     elif "DATE" in name:
       return FieldType.DATETIME, 19, 0
     elif "TEXT" in name:
-      return FieldType.VAR_STRING, 2 ** 16 -1, 0x1f
+      return FieldType.VAR_STRING, 2 ** 16 - 1, 0x1f
     else:
       return FieldType.BLOB, 2 ** 16 - 1, 0x1f
 

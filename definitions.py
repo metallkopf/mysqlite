@@ -1,18 +1,19 @@
-from enum import IntFlag, IntEnum
+from enum import IntEnum, IntFlag
 
 
 class Capability(IntFlag):
-  LONG_PASSWORD = 0x1 # new more secure passwords
-  FOUND_ROWS = 0x2 # Found instead of affected rows
-  LONG_FLAG = 0x4 # Get all column flags
-  CONNECT_WITH_DB = 0x8 # One can specify db on connect
-  NO_SCHEMA = 0x10 # Don't allow database.table.column
-  COMPRESS = 0x20 # Can use compression protocol
-  PROTOCOL_41 = 0x200 # New 4.1 protocol
-  INTERACTIVE = 0x400 # This is an interactive client
-  TRANSACTIONS = 0x2000 # Client knows about transactions
-  SECURE_CONNECTION = 0x8000 # New 4.1 authentication
-  CONNECT_ATTRS = 0x100000 # Supports connection attributes
+  LONG_PASSWORD = 0x1  # new more secure passwords
+  FOUND_ROWS = 0x2  # Found instead of affected rows
+  LONG_FLAG = 0x4  # Get all column flags
+  CONNECT_WITH_DB = 0x8  # One can specify db on connect
+  NO_SCHEMA = 0x10  # Don't allow database.table.column
+  COMPRESS = 0x20  # Can use compression protocol
+  PROTOCOL_41 = 0x200  # New 4.1 protocol
+  INTERACTIVE = 0x400  # This is an interactive client
+  TRANSACTIONS = 0x2000  # Client knows about transactions
+  SECURE_CONNECTION = 0x8000  # New 4.1 authentication
+  CONNECT_ATTRS = 0x100000  # Supports connection attributes
+
 
 class Command(IntEnum):
   SLEEP = 0
@@ -45,18 +46,21 @@ class Command(IntEnum):
   SET_OPTION = 27
   STMT_FETCH = 28
 
+
 class Status(IntFlag):
-  IN_TRANS = 1 # Transaction has started
-  AUTOCOMMIT = 2 # Server in auto_commit mode
-  MORE_RESULTS = 4 # More results on server
-  MORE_RESULTS_EXISTS = 8 # Multi query - next query exists
+  IN_TRANS = 1  # Transaction has started
+  AUTOCOMMIT = 2  # Server in auto_commit mode
+  MORE_RESULTS = 4  # More results on server
+  MORE_RESULTS_EXISTS = 8  # Multi query - next query exists
   QUERY_NO_GOOD_INDEX_USED = 16
   QUERY_NO_INDEX_USED = 32
-  DB_DROPPED = 256 # A database was dropped
+  DB_DROPPED = 256  # A database was dropped
+
 
 class Charset(IntEnum):
   UTF8_GENERAL_CI = 33
   BINARY = 63
+
 
 class FieldType(IntEnum):
   DECIMAL = 0x00
@@ -84,16 +88,17 @@ class FieldType(IntEnum):
   STRING = 0xfe
   GEOMETRY = 0xff
 
+
 class FieldFlag(IntFlag):
-  NOT_NULL = 1 # Field can't be NULL
-  PRI_KEY = 2 # Field is part of a primary key
-  UNIQUE_KEY = 4 # Field is part of a unique key
-  MULTIPLE_KEY = 8 # Field is part of a key
-  BLOB = 16 # Field is a blob
-  UNSIGNED = 32 # Field is unsigned
-  ZEROFILL = 64 # Field is zerofill
-  BINARY = 128 # Field is binary
-  ENUM = 256 # field is an enum
-  AUTO_INCREMENT = 512 # field is a autoincrement field
-  TIMESTAMP = 1024 # Field is a timestamp
-  SET = 2048 # field is a set
+  NOT_NULL = 1  # Field can't be NULL
+  PRI_KEY = 2  # Field is part of a primary key
+  UNIQUE_KEY = 4  # Field is part of a unique key
+  MULTIPLE_KEY = 8  # Field is part of a key
+  BLOB = 16  # Field is a blob
+  UNSIGNED = 32  # Field is unsigned
+  ZEROFILL = 64  # Field is zerofill
+  BINARY = 128  # Field is binary
+  ENUM = 256  # Field is an enum
+  AUTO_INCREMENT = 512  # field is a autoincrement field
+  TIMESTAMP = 1024  # Field is a timestamp
+  SET = 2048  # Field is a set

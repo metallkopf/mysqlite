@@ -1,9 +1,10 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-from socketserver import ThreadingTCPServer
 from argparse import ArgumentParser
+from logging import DEBUG, INFO, basicConfig, info
 from os.path import isfile
-from logging import basicConfig, DEBUG, INFO, info
+from socketserver import ThreadingTCPServer
+
 from server import Server
 
 

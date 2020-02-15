@@ -1,16 +1,16 @@
-#!/usr/bin/env python
-
+from io import BytesIO
+from logging import debug, info
+from parser import guess_statement
 from socketserver import StreamRequestHandler
 from threading import current_thread
-from binascii import hexlify
-from io import BytesIO
-from database import Database
-from definitions import *
-from logging import debug, info, warning, error
-from traceback import print_exc
-from parser import guess_statement
 from time import monotonic
-from utils import *
+from traceback import print_exc
+
+from database import Database
+from definitions import Capability, Charset, Command, FieldType, Status
+from utils import pack_byte, pack_fixedstring, pack_header, pack_integer, \
+  pack_long, pack_nullstring, pack_padding, pack_resstring, pack_string, \
+  pack_varinteger, read_data, read_header, read_string, read_varstring
 
 
 CAPABILITIES = Capability.LONG_PASSWORD | Capability.FOUND_ROWS | \
@@ -64,20 +64,20 @@ class Server(StreamRequestHandler):
 
   def send_handshake(self):
     payload = BytesIO()
-    payload.write(pack_byte(10)) # protocol version
-    payload.write(pack_nullstring(self.db.version)) # server version
-    payload.write(pack_long(self.thread)) # connection id
-    payload.write(pack_fixedstring(" " * 8)) # auth-plugin-data-part-1
-    payload.write(pack_padding()) # filler
-    payload.write(pack_integer(CAPABILITIES)) # capability flags
+    payload.write(pack_byte(10))  # protocol version
+    payload.write(pack_nullstring(self.db.version))  # server version
+    payload.write(pack_long(self.thread))  # connection id
+    payload.write(pack_fixedstring(" " * 8))  # auth-plugin-data-part-1
+    payload.write(pack_padding())  # filler
+    payload.write(pack_integer(CAPABILITIES))  # capability flags
 
-    payload.write(pack_byte(CHARSET)) # character set
-    payload.write(pack_integer(STATUS)) # status flags
-    payload.write(pack_integer(CAPABILITIES >> 16)) # capability flags
+    payload.write(pack_byte(CHARSET))  # character set
+    payload.write(pack_integer(STATUS))  # status flags
+    payload.write(pack_integer(CAPABILITIES >> 16))  # capability flags
 
     payload.write(pack_padding())
 
-    payload.write(pack_padding(10)) # reserved
+    payload.write(pack_padding(10))  # reserved
 
     # auth-plugin-data-part-2
     if CAPABILITIES & Capability.SECURE_CONNECTION:
@@ -89,39 +89,39 @@ class Server(StreamRequestHandler):
   def send_ok(self, affected_rows=0, last_insert_id=0, warnings=0):
     payload = BytesIO()
 
-    payload.write(pack_padding()) # header
-    payload.write(pack_varinteger(affected_rows)) # affected_rows
-    payload.write(pack_varinteger(last_insert_id)) # last_insert_id
+    payload.write(pack_padding())  # header
+    payload.write(pack_varinteger(affected_rows))  # affected_rows
+    payload.write(pack_varinteger(last_insert_id))  # last_insert_id
 
     if self.capabilities & Capability.PROTOCOL_41:
-      payload.write(pack_integer(STATUS)) # status_flags
-      payload.write(pack_integer(warnings)) # warnings
+      payload.write(pack_integer(STATUS))  # status_flags
+      payload.write(pack_integer(warnings))  # warnings
 
     self.queue_packet(payload, True)
 
   def send_eof(self, warnings=0):
     payload = BytesIO()
-    payload.write(pack_byte(0xfe)) # header
-    payload.write(pack_integer(warnings)) # warnings
+    payload.write(pack_byte(0xfe))  # header
+    payload.write(pack_integer(warnings))  # warnings
     payload.write(pack_integer(STATUS))
 
     self.queue_packet(payload)
 
-  def send_error(self, message="", error=1064, state="42000"):
+  def send_error(self, message="", code=1064, state="42000"):
     payload = BytesIO()
-    payload.write(pack_byte(0xff)) # header
-    payload.write(pack_integer(error)) # error_code
+    payload.write(pack_byte(0xff))  # header
+    payload.write(pack_integer(code))  # error_code
 
     if self.capabilities & Capability.PROTOCOL_41:
-      payload.write(pack_fixedstring("#")) # sql_state_marker
-      payload.write(pack_fixedstring(state)) # sql_state
+      payload.write(pack_fixedstring("#"))  # sql_state_marker
+      payload.write(pack_fixedstring(state))  # sql_state
 
-    payload.write(pack_fixedstring(message)) # error_message
+    payload.write(pack_fixedstring(message))  # error_message
 
     self.queue_packet(payload, True)
 
-  def send_unsupported(self, error=""):
-    message = "This version of SQLite doesn't yet support '%s'" % error
+  def send_unsupported(self, message=""):
+    message = "This version of SQLite doesn't yet support '%s'" % message
     self.send_error(message, 1235)
 
   def send_columndef(self, name, field, length, decimals):
@@ -129,27 +129,27 @@ class Server(StreamRequestHandler):
 
     collation = Charset.UTF8_GENERAL_CI if field == FieldType.VAR_STRING else Charset.BINARY
 
-    if field in [FieldType.DECIMAL, FieldType.DOUBLE]: # total length
+    if field in [FieldType.DECIMAL, FieldType.DOUBLE]:  # total length
       length += decimals
-    elif field == FieldType.VAR_STRING: # utf8 = char * 3
+    elif field == FieldType.VAR_STRING:  # utf8 = char * 3
       length *= 3
 
-    payload.write(pack_string("def")) # catalog
-    payload.write(pack_padding()) # schema
-    payload.write(pack_padding()) # table
+    payload.write(pack_string("def"))  # catalog
+    payload.write(pack_padding())  # schema
+    payload.write(pack_padding())  # table
 
-    payload.write(pack_padding()) # org_table
+    payload.write(pack_padding())  # org_table
 
-    payload.write(pack_string(name)) # name
-    payload.write(pack_string()) # org_name
+    payload.write(pack_string(name))  # name
+    payload.write(pack_string())  # org_name
 
-    payload.write(pack_byte(0x0c)) # length of fixed-length fields
-    payload.write(pack_integer(collation)) # character set
-    payload.write(pack_long(length)) # column length
-    payload.write(pack_byte(field)) # type
-    payload.write(pack_padding(2)) # flags
-    payload.write(pack_byte(decimals)) # decimals
-    payload.write(pack_padding(2)) # filler
+    payload.write(pack_byte(0x0c))  # length of fixed-length fields
+    payload.write(pack_integer(collation))  # character set
+    payload.write(pack_long(length))  # column length
+    payload.write(pack_byte(field))  # type
+    payload.write(pack_padding(2))  # flags
+    payload.write(pack_byte(decimals))  # decimals
+    payload.write(pack_padding(2))  # filler
 
     self.queue_packet(payload)
 
