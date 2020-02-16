@@ -12,7 +12,7 @@ def pack_string(value=None):
 def pack_resstring(value):
   if value is None:
     return pack_byte(0xfb)
-  elif type(value) is not str:
+  elif type(value) not in [str, bytes]:
     value = str(value)
 
   return pack_string(value)
@@ -20,13 +20,18 @@ def pack_resstring(value):
 
 def pack_nullstring(value=""):
   if len(value) > 0:
-    return pack("%dsx" % len(value), value.encode())
+    if type(value) is not bytes:
+      value = value.encode()
+
+    return pack("%dsx" % len(value), value)
   else:
     return pack_padding()
 
 
 def pack_fixedstring(value="", length=1):
-  return pack("%ds" % max(len(value), length), value.encode())
+  if type(value) is not bytes:
+    value = value.encode()
+  return pack("%ds" % max(len(value), length), value)
 
 
 def pack_byte(value):

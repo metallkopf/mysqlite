@@ -7,7 +7,8 @@ from time import monotonic
 from traceback import print_exc
 
 from database import Database
-from definitions import Capability, Charset, Command, FieldType, Status
+from definitions import Capability, Charset, Command, FieldFlag, FieldType, \
+  Status
 from utils import pack_byte, pack_fixedstring, pack_header, pack_integer, \
   pack_long, pack_nullstring, pack_padding, pack_resstring, pack_string, \
   pack_varinteger, read_data, read_header, read_string, read_varstring
@@ -128,11 +129,16 @@ class Server(StreamRequestHandler):
     payload = BytesIO()
 
     collation = Charset.UTF8_GENERAL_CI if field == FieldType.VAR_STRING else Charset.BINARY
+    flags = 0
 
     if field in [FieldType.DECIMAL, FieldType.DOUBLE]:  # total length
       length += decimals
     elif field == FieldType.VAR_STRING:  # utf8 = char * 3
       length *= 3
+    elif field == FieldType.TIMESTAMP:
+      flags = FieldFlag.TIMESTAMP
+    elif field == FieldType.BLOB:
+      flags = FieldFlag.BLOB | FieldFlag.BINARY
 
     payload.write(pack_string("def"))  # catalog
     payload.write(pack_padding())  # schema
@@ -141,13 +147,13 @@ class Server(StreamRequestHandler):
     payload.write(pack_padding())  # org_table
 
     payload.write(pack_string(name))  # name
-    payload.write(pack_string())  # org_name
+    payload.write(pack_padding())  # org_name
 
     payload.write(pack_byte(0x0c))  # length of fixed-length fields
     payload.write(pack_integer(collation))  # character set
     payload.write(pack_long(length))  # column length
     payload.write(pack_byte(field))  # type
-    payload.write(pack_padding(2))  # flags
+    payload.write(pack_integer(flags))  # flags
     payload.write(pack_byte(decimals))  # decimals
     payload.write(pack_padding(2))  # filler
 

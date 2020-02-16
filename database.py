@@ -251,7 +251,9 @@ class Database:
     elif field == FieldType.VAR_STRING:
       return "varchar(%d)" % length
     elif field == FieldType.DATETIME:
-      return "datetime(%d)" % length
+      return "datetime"
+    elif field == FieldType.TIMESTAMP:
+      return "timestamp"
     elif field == FieldType.BLOB:
       return "blob"
     else:
@@ -259,42 +261,46 @@ class Database:
 
   def internal_type(self, name):
     if name is None:
-      return FieldType.BLOB, 2 ** 16 - 1, 0x1f
+      return FieldType.BLOB, 2 ** 24 - 1, 0
 
     name = name.upper()
     field = name
     length = 0
     decimals = 0
 
-    results = match(r"(\w+)\((\d+),(\d+)\)", name)
+    results = match(r"(\w+2?)\((\d+),(\d+)\)", name)
     if results:
       field, length, decimals = results.groups()
     else:
-      results = match(r"(\w+)\((\d+)\)", name)
+      results = match(r"(\w+2?)\((\d+)\)", name)
       if results:
         field, length = results.groups()
 
     length = int(length)
     decimals = int(decimals)
 
-    if "INT" in name:
+    if "INT" in field:
       return FieldType.LONGLONG, 21, 0
-    elif "DECIMAL" in name or "NUMERIC" in name:
+    elif "DECIMAL" in field or "NUMERIC" in field:
      return FieldType.DECIMAL, length, decimals
-    elif "FLOAT" in name or "DOUBLE" in name or "REAL" in name:
+    elif "FLOAT" in field or "DOUBLE" in field or "REAL" in field:
       if length == 0:
         length = 53
       if decimals + length > 53:
         length -= decimals
       return FieldType.DOUBLE, length, decimals
-    elif "CHAR" in name and length > 0:
-      return FieldType.VAR_STRING, length, 0x1f
-    elif "DATE" in name:
+    elif "CHAR" in field:
+      if length == 0:
+        length = 2 ** 8 - 1
+      return FieldType.VAR_STRING, length, 0
+    elif "DATE" in field:
       return FieldType.DATETIME, 19, 0
-    elif "TEXT" in name:
-      return FieldType.VAR_STRING, 2 ** 16 - 1, 0x1f
+    elif "STAMP" in field:
+      return FieldType.TIMESTAMP, 19, 0
+    elif "TEXT" in field:
+      return FieldType.VAR_STRING, 2 ** 16 - 1, 0
     else:
-      return FieldType.BLOB, 2 ** 16 - 1, 0x1f
+      return FieldType.BLOB, 2 ** 24 - 1, 0
 
   def show_columns(self, name, full=False):
     meta = None
