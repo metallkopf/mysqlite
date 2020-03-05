@@ -1,6 +1,8 @@
 # MySQLite
 MySQLite is an application that exposes a SQLite database as read-only over MySQL Protocol 4.1
 
+ >**WARNING**: the server accepts all connections, there is not authentication method implemented, handle with care
+
 ## Installation
 ```bash
 $ curl https://github.com/metallkopf/mysqlite/archive/master.tar.gz -o mysqlite-master.tar.gz
@@ -24,6 +26,7 @@ optional arguments:
 ## TODO (in no particular order)
 * improve command support
 * return more accurate data types
+* implement authentication?
 
 ## License
 [GPLv2](https://www.gnu.org/licenses/gpl-2.0.html)
