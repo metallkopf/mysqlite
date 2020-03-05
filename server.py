@@ -50,7 +50,7 @@ class Server(StreamRequestHandler):
 
     length = len(payload)
     header = pack_header(length, self.number)
-    debug("> %s", payload)
+    debug(f"> {payload}")
 
     self.packet.write(header)
     self.packet.write(payload)
@@ -121,23 +121,22 @@ class Server(StreamRequestHandler):
 
     self.queue_packet(payload, True)
 
-  def send_unsupported(self, message=""):
-    message = "This version of SQLite doesn't yet support '%s'" % message
-    self.send_error(message, 1235)
+  def send_unsupported(self, command):
+    self.send_error(f"This version of SQLite doesn't yet support '{command}'", 1235)
 
-  def send_columndef(self, name, field, length, decimals):
+  def send_columndef(self, name, _type, length, decimals):
     payload = BytesIO()
 
-    collation = Charset.UTF8_GENERAL_CI if field == FieldType.VAR_STRING else Charset.BINARY
+    collation = Charset.UTF8_GENERAL_CI if _type == FieldType.VAR_STRING else Charset.BINARY
     flags = 0
 
-    if field in [FieldType.DECIMAL, FieldType.DOUBLE]:  # total length
+    if _type in [FieldType.DECIMAL, FieldType.DOUBLE]:  # total length
       length += decimals
-    elif field == FieldType.VAR_STRING:  # utf8 = char * 3
+    elif _type == FieldType.VAR_STRING:  # utf8 = char * 3
       length *= 3
-    elif field == FieldType.TIMESTAMP:
+    elif _type == FieldType.TIMESTAMP:
       flags = FieldFlag.TIMESTAMP
-    elif field == FieldType.BLOB:
+    elif _type == FieldType.BLOB:
       flags = FieldFlag.BLOB | FieldFlag.BINARY
 
     payload.write(pack_string("def"))  # catalog
@@ -152,7 +151,7 @@ class Server(StreamRequestHandler):
     payload.write(pack_byte(0x0c))  # length of fixed-length fields
     payload.write(pack_integer(collation))  # character set
     payload.write(pack_long(length))  # column length
-    payload.write(pack_byte(field))  # type
+    payload.write(pack_byte(_type))  # type
     payload.write(pack_integer(flags))  # flags
     payload.write(pack_byte(decimals))  # decimals
     payload.write(pack_padding(2))  # filler
@@ -163,8 +162,8 @@ class Server(StreamRequestHandler):
     meta, rows = data
     self.queue_packet(pack_byte(len(meta)))
 
-    for (name, _, field, length, decimals) in meta:
-      self.send_columndef(name, field, length, decimals)
+    for (name, _, _type, length, decimals) in meta:
+      self.send_columndef(name, _type, length, decimals)
 
     self.send_eof()
 
@@ -227,8 +226,7 @@ class Server(StreamRequestHandler):
       self.schema = name
       connections[self.port]["schema"] = self.schema
     else:
-      message = "Access denied for user '%s'@'%s' to database '%s'" % \
-        (self.username, self.client_address[0], name)
+      message = f"Access denied for user '{self.username}'@'{self.client_address[0]}' to database '{name}'"
       self.send_error(message, 1044)
 
   def _extract_table(self, text):
@@ -268,8 +266,7 @@ class Server(StreamRequestHandler):
     elif function == "show_processlist":
       self.send_processlist(params["modifier"])
     elif function == "help":
-      message = "Help database is corrupt or does not exist"
-      self.send_error(message, 1244, "HY000")
+      self.send_error("Help database is corrupt or does not exist", 1244, "HY000")
     else:
       return False
 
@@ -282,7 +279,7 @@ class Server(StreamRequestHandler):
     self.send_handshake()
     self.port = self.client_address[1]
     connections[self.port] = {"thread": self.thread, "username": None,
-                              "host": "%s:%d" % self.client_address,
+                              "host": f"{self.client_address[0]}:{self.client_address[1]}",
                               "schema": None, "time": monotonic(),
                               "command": Command.CONNECT.value}
 
@@ -293,7 +290,7 @@ class Server(StreamRequestHandler):
       payload.write(self.rfile.read(length))
       payload.seek(0)
 
-      debug("< %s", payload.getvalue())
+      debug(f"< {payload.getvalue()}")
 
       if not self.connected:
         self.handle_handshake(payload)
@@ -308,9 +305,9 @@ class Server(StreamRequestHandler):
 
       if command == Command.QUERY:
         query = read_string(payload).strip().strip(";")
-        info("QUERY: %s", query)
+        info(f"QUERY: {query}")
 
-        keyword = query.upper().split(" ", 1)[0]
+        keyword = query.split(" ", 1)[0].upper()
 
         if keyword == "SELECT":
           try:
@@ -322,8 +319,7 @@ class Server(StreamRequestHandler):
           if keyword == "SET":
             self.send_ok()
           else:
-            message = "Access denied for user '%s'@'%s' to database '%s'" % \
-              (self.username, self.client_address[0], self.schema)
+            message = f"Access denied for user '{self.username}'@'{self.client_address[0]}' to database '{self.schema}'"
             self.send_error(message, 1044)
       elif command == Command.INIT_DB:
         name = read_string(payload)

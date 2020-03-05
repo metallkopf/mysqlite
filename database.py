@@ -56,8 +56,8 @@ class Database:
     extra = []
 
     for column in self._column_list(name):
-      line = "  %s" % column["name"]
-      line += " %s" % column["type"]
+      line = f"  {column['name']}"
+      line += f" {column['type']}"
 
       if not column["nullable"]:
         line += " NOT NULL"
@@ -66,7 +66,7 @@ class Database:
         if column["default"] is None:
           line += " DEFAULT NULL"
         else:
-          line += " DEFAULT '%s'" % column["default"]
+          line += f" DEFAULT '{column['default']}'"
 
       if column["serial"]:
         line += " AUTO_INCREMENT"
@@ -77,9 +77,9 @@ class Database:
         primaries.append(column["name"])
 
       if column["index"]:
-        line = " %s KEY %s (%s%s)" % (" UNIQUE" if column["unique"] else "",
-                                      column["index"], column["name"],
-                                      " ASC" if column["order"] == 1 else "")
+        unique = " UNIQUE" if column["unique"] else ""
+        order = " ASC" if column["order"] == 1 else ""
+        line = f" {unique} KEY {column['index']} ({column['name']}{order})"
         extra.append(line)
 
       if column["foreign"]:
@@ -102,12 +102,10 @@ class Database:
     return self.expand_meta(meta), []
 
   def _index_list(self, table):
-    query = "PRAGMA index_list([%s])" % table
     indexes = {}
 
-    for row in self._execute(query):
-      query = "PRAGMA index_xinfo([%s])" % row[1]
-      details = self._execute(query).fetchone()
+    for row in self._execute(f"PRAGMA index_list([{table}])"):
+      details = self._execute(f"PRAGMA index_xinfo([{row[1]}])").fetchone()
 
       indexes[details[2]] = {"index": row[1], "unique": bool(row[2]),
                              "order": 1 if details[3] == 0 else -1}
@@ -115,10 +113,9 @@ class Database:
     return indexes
 
   def _foreign_list(self, table):
-    query = "PRAGMA foreign_key_list([%s])" % table
     foreigns = {}
 
-    for row in self._execute(query):
+    for row in self._execute(f"PRAGMA foreign_key_list([{table}])"):
       foreigns[row[3]] = {"table": row[2], "foreign": row[4],
                           "update": row[5], "delete": row[6]}
 
@@ -127,10 +124,9 @@ class Database:
   def _column_list(self, table):
     indexes = self._index_list(table)
     foreigns = self._foreign_list(table)
-    query = "PRAGMA table_info([%s])" % table
     columns = []
 
-    for row in self._execute(query):
+    for row in self._execute(f"PRAGMA table_info([{table}])"):
       column = {"name": row[1], "type": self.visible_type(row[2]),
                 "nullable": row[3] == 0, "primary": bool(row[5]),
                 "default": None if row[4] == "NULL" else row[4],
@@ -151,12 +147,10 @@ class Database:
     return columns
 
   def _calc_cardinality(self, table, column):
-    query = "SELECT COUNT(DISTINCT([%s])) FROM [%s]" % (column, table)
-    return self._execute(query).fetchone()[0]
+    return self._execute(f"SELECT COUNT(DISTINCT([{column}])) FROM [{table}]").fetchone()[0]
 
   def _count_rows(self, table):
-    query = "SELECT COUNT(1) FROM [%s]" % table
-    return self._execute(query).fetchone()[0]
+    return self._execute(f"SELECT COUNT(1) FROM [{table}]").fetchone()[0]
 
   def _next_id(self, table):
     primary = None
@@ -168,8 +162,7 @@ class Database:
     else:
       return None
 
-    query = "SELECT COUNT([%s]) FROM [%s]" % (primary, table)
-    return self._execute(query).fetchone()[0] + 1
+    return self._execute(f"SELECT COUNT([{primary}]) FROM [{table}]").fetchone()[0] + 1
 
   def show_indexes(self, table):
     meta = (("Table", "VARCHAR(64)"), ("Non_unique", "INTEGER"),
@@ -243,13 +236,13 @@ class Database:
     field, length, decimals = self.internal_type(name)
 
     if field == FieldType.LONGLONG:
-      return "int(%d)" % length
+      return f"int({length})"
     elif field == FieldType.DECIMAL:
-      return "decimal(%d,%d)" % (length, decimals)
+      return f"decimal({length},{decimals})"
     elif field == FieldType.DOUBLE:
-      return "double(%d,%d)" % (length, decimals)
+      return f"double({length},{decimals})"
     elif field == FieldType.VAR_STRING:
-      return "varchar(%d)" % length
+      return f"varchar({length})"
     elif field == FieldType.DATETIME:
       return "datetime"
     elif field == FieldType.TIMESTAMP:
@@ -348,8 +341,8 @@ class Database:
     new_meta = []
 
     for name, field in meta:
-      value, length, decimals = self.internal_type(field)
-      new_meta.append((name, field, value, length, decimals))
+      _type, length, decimals = self.internal_type(field)
+      new_meta.append((name, field, _type, length, decimals))
 
     return new_meta
 

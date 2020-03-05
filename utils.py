@@ -4,6 +4,8 @@ from struct import calcsize, pack, unpack
 
 def pack_string(value=None):
   if value is not None and len(value) > 0:
+    if not isinstance(value, bytes):
+      value = value.encode()
     return pack_varinteger(len(value)) + pack_fixedstring(value)
   else:
     return pack_padding()
@@ -20,16 +22,13 @@ def pack_resstring(value):
 
 def pack_nullstring(value=""):
   if len(value) > 0:
-    if type(value) is not bytes:
-      value = value.encode()
-
-    return pack("%dsx" % len(value), value)
+    return pack_fixedstring(value) + b"\0"
   else:
     return pack_padding()
 
 
 def pack_fixedstring(value="", length=1):
-  if type(value) is not bytes:
+  if not isinstance(value, bytes):
     value = value.encode()
   return pack("%ds" % max(len(value), length), value)
 
