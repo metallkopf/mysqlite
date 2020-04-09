@@ -89,7 +89,7 @@ def read_string(payload):
 
 def read_varstring(payload):
   length = read_data(payload, "<B")[0]
-  return read_data(payload, "%ds" % length)[0]
+  return read_data(payload, f"{length}s")[0]
 
 
 def read_header(payload):

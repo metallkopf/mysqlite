@@ -2,3 +2,7 @@
 *.sql
 *.pcapng
 Pipfile.lock
+*/__pycache__/
+build/
+dist/
+*.egg-info/

@@ -3,30 +3,41 @@ MySQLite is an application that exposes a SQLite database as read-only over MySQ
 
  >**WARNING**: the server accepts all connections, there is not authentication method implemented, handle with care
 
-## Installation
+## Install
 ```bash
-$ curl https://github.com/metallkopf/mysqlite/archive/master.tar.gz -o mysqlite-master.tar.gz
-$ tar zxf mysqlite-master.tar.gz
-$ cd mysqlite-master
-$ pipenv install
+# From source
+pipenv install git+https://github.com/metallkopf/mysqlite.git@master#egg=mysqlite
+
+# Wheels
+pipenv install https://github.com/metallkopf/mysqlite/releases/download/0.1.0/mysqlite-0.1.0-py3-none-any.whl
+```
+
+## Run
+```bash
+pipenv run mysqlite --filename DATABASE.SQLITE
 ```
 
 ## Usage
 ```bash
-$ pipenv run python mysqlite.py --help
-usage: mysqlite.py [--help] --path PATH [--address ADDRESS] [--port PORT] [--debug]
+mysqlite --help
+```
+```
+usage: mysqlite [--filename FILENAME] [--address ADDRESS] [--port PORT] [--debug] [--version] [--help]
 
 optional arguments:
-  --path PATH
-  --address ADDRESS (default: localhost)
-  --port PORT (default: 3306)
-  --debug
+  --filename FILENAME  Path of the SQLite database
+  --address ADDRESS    IP address to bind to (default: localhost)
+  --port PORT          Port number to use for connections (default: 3306)
+  --debug              Print packets payload (default: False)
+  --version            Version information
+  --help               This help
 ```
 
 ## TODO (in no particular order)
 * improve command support
 * return more accurate data types
 * implement authentication?
+* multiples databases?
 
 ## License
 [GPLv2](https://www.gnu.org/licenses/gpl-2.0.html)

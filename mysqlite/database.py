@@ -2,15 +2,15 @@ from re import match
 
 from apsw import SQLITE_ACCESS_READ, Connection
 
-from definitions import Charset, FieldType
+from mysqlite.definitions import Charset, FieldType
 
 
 class Database:
   inst = None
   version = ""
 
-  def __init__(self, path):
-    self.inst = Connection(path, SQLITE_ACCESS_READ)
+  def __init__(self, filename):
+    self.inst = Connection(filename, SQLITE_ACCESS_READ)
     self.version = "4.1.25-SQLite"
 
   def _execute(self, query, params=None):

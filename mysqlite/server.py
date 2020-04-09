@@ -1,17 +1,18 @@
 from io import BytesIO
 from logging import debug, info
-from parser import guess_statement
 from socketserver import StreamRequestHandler
 from threading import current_thread
 from time import monotonic
 from traceback import print_exc
 
-from database import Database
-from definitions import Capability, Charset, Command, FieldFlag, FieldType, \
-  Status
-from utils import pack_byte, pack_fixedstring, pack_header, pack_integer, \
-  pack_long, pack_nullstring, pack_padding, pack_resstring, pack_string, \
-  pack_varinteger, read_data, read_header, read_string, read_varstring
+from mysqlite.database import Database
+from mysqlite.definitions import Capability, Charset, Command, FieldFlag, \
+  FieldType, Status
+from mysqlite.parser import guess_statement
+from mysqlite.utils import pack_byte, pack_fixedstring, pack_header, \
+  pack_integer, pack_long, pack_nullstring, pack_padding, pack_resstring, \
+  pack_string, pack_varinteger, read_data, read_header, read_string, \
+  read_varstring
 
 
 CAPABILITIES = Capability.LONG_PASSWORD | Capability.FOUND_ROWS | \
@@ -273,7 +274,7 @@ class Server(StreamRequestHandler):
     return True
 
   def handle(self):
-    self.db = Database(self.server.path)
+    self.db = Database(self.server.filename)
     self.thread = int(current_thread().name.split("-")[-1])
     self.packet = BytesIO()
     self.send_handshake()
